@@ -1,0 +1,19 @@
+[package]
+name = "ygopro-data"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+binrw = "0.13"
+bitflags = "2.4"
+encoding_rs = "0.8"
+lzma-rs = "0.3"
+num_enum = "0.7"
+once_cell = "1"
+thiserror = "1"
+ygopro-derive = { path = "../ygopro-derive" }
+
+[build-dependencies]
+syn = "1.0"
+darling = "0.14"
