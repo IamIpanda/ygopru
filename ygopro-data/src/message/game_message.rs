@@ -11,7 +11,7 @@ use crate::data::UpdateCardInfo;
 use crate::utils::string::U16String;
 
 include!(concat!(env!("OUT_DIR"), "/game_message.rs"));
-every_message!(crate::generate_enum);
+every_game_message_flat_message!(crate::generate_enum);
 
 #[binrw]
 #[derive(Debug, Message)]
@@ -25,7 +25,7 @@ pub struct Retry;
 #[repr(C)]
 pub struct Hint {
     pub _type: crate::constants::Hint,
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     pub data: i32
 }
 
@@ -40,7 +40,7 @@ pub struct Waiting;
 #[message(gm, flag = 4)]
 #[repr(C)]
 pub struct Start {
-    pub plyaer_type: u8,
+    pub player_type: u8,
     pub rule: i8,
     pub player1_lp: i32,
     pub player2_lp: i32,
@@ -55,7 +55,7 @@ pub struct Start {
 #[message(gm, flag = 5)]
 #[repr(C)]
 pub struct Win {
-    pub winner: Netplayer,
+    pub winner: LocalPlayer,
     pub reason: u8
 }
 
@@ -64,7 +64,7 @@ pub struct Win {
 #[message(gm, flag = 6)]
 #[repr(C)]
 pub struct UpdateData {
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     pub location: Location,
     #[br(parse_with=until_eof)]
     pub data: Vec<UpdateCardInfo>
@@ -90,7 +90,7 @@ pub struct RequestDeck;
 #[message(gm, flag = 10)]
 #[repr(C)]
 pub struct SelectBattleCommand {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     #[bw(calc(activatable_cards.len() as u8))]
     activatable_cards_size: u8,
     #[br(count = activatable_cards_size)]
@@ -112,7 +112,7 @@ pub struct SelectBattleCommand {
 #[message(gm, flag = 11)]
 #[repr(C)]
 pub struct SelectIdleCommand {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     #[bw(calc(summonable_cards.len() as u8))]
     summonable_cards_size: u8,
     #[br(count = summonable_cards_size)]
@@ -153,7 +153,7 @@ pub struct SelectIdleCommand {
 #[message(gm, flag = 12)]
 #[repr(C)]
 pub struct SelectEffectYesNo {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     pub card_position: CardPosition<true, true, true>,
 }
 
@@ -162,7 +162,7 @@ pub struct SelectEffectYesNo {
 #[message(gm, flag = 13)]
 #[repr(C)]
 pub struct SelectYesNo {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     pub description: i32
 }
 
@@ -171,7 +171,7 @@ pub struct SelectYesNo {
 #[message(gm, flag = 14)]
 #[repr(C)]
 pub struct SelectOption {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     #[bw(calc(options.len() as u8))]
     options_size: u8,
     #[br(count = options_size)]
@@ -183,7 +183,7 @@ pub struct SelectOption {
 #[message(gm, flag = 15)]
 #[repr(C)]
 pub struct SelectCard {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     #[br(map=|v:u8| v>0)]
     #[bw(map=|v| if *v {1u8} else {0u8})]
     pub select_cancelable: bool,
@@ -200,7 +200,7 @@ pub struct SelectCard {
 #[message(gm, flag = 16)]
 #[repr(C)]
 pub struct SelectChain {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     #[bw(calc(activatable_cards.len() as u8))]
     pub activatable_cards_count: u8,
     pub specount: u8,
@@ -216,9 +216,9 @@ pub struct SelectChain {
 #[message(gm, flag = 18)]
 #[repr(C)]
 pub struct SelectPlace {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     pub count: i8,
-    pub selectzble_field: i32,
+    pub selectable_field: i32,
 }
 
 #[binrw]
@@ -226,7 +226,7 @@ pub struct SelectPlace {
 #[message(gm, flag = 19)]
 #[repr(C)]
 pub struct SelectPosition {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     pub code: u32,
     pub positions: Position
 }
@@ -236,7 +236,7 @@ pub struct SelectPosition {
 #[message(gm, flag = 20)]
 #[repr(C)]
 pub struct SelectTribute {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     #[br(map=|v:u8| v>0)]
     #[bw(map=|v| if *v {1u8} else {0u8})]
     pub cancelable: bool,
@@ -259,7 +259,7 @@ pub struct SortChain;
 #[message(gm, flag = 22)]
 #[repr(C)]
 pub struct SelectCounter {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     pub select_counter_type: i16,
     pub select_counter_count: i16,
     #[bw(calc(selectable_cards.len() as u8))]
@@ -274,7 +274,7 @@ pub struct SelectCounter {
 #[repr(C)]
 pub struct SelectSum {
     pub select_mode: i8,
-    pub selecting_player: i8, // Player
+    pub selecting_player: LocalPlayer,
     pub select_sum_value: i32,
     pub select_min: i8,
     pub select_max: i8,
@@ -293,9 +293,9 @@ pub struct SelectSum {
 #[message(gm, flag = 24)]
 #[repr(C)]
 pub struct SelectDisableField {
-    pub selecting_player: Netplayer,
+    pub selecting_player: LocalPlayer,
     pub count: i8,
-    pub selectzble_field: i32,
+    pub selectable_field: i32,
 }
 
 #[binrw]
@@ -303,7 +303,7 @@ pub struct SelectDisableField {
 #[message(gm, flag = 25)]
 #[repr(C)]
 pub struct SortCard {
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     #[bw(calc(cards.len() as u8))]
     cards_size: u8,
     #[br(count = cards_size)]
@@ -315,7 +315,7 @@ pub struct SortCard {
 #[message(gm, flag = 26)]
 #[repr(C)]
 pub struct SelectUnselectCard {
-    pub selecting_playuer: Netplayer,
+    pub selecting_player: LocalPlayer,
     #[br(map=|v:u8| v>0)]
     #[bw(map=|v| if *v {1u8} else {0u8})]
     pub able: bool,
@@ -476,7 +476,7 @@ pub struct Move {
 #[repr(C)]
 pub struct PositionChange {
     pub card: u32,
-    pub controller: Netplayer,
+    pub controller: LocalPlayer,
     pub location: Location,
     pub sequence: i8,
     pub previous_position: Position,
@@ -618,7 +618,7 @@ pub struct CardSelected;
 #[message(gm, flag = 81)]
 #[repr(C)]
 pub struct RandomSelected {
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     #[bw(calc(pcards.len() as u8))]
     pcards_size: u8,
     #[br(count = pcards_size)]
@@ -641,7 +641,7 @@ pub struct BecomeTarget {
 #[message(gm, flag = 90)]
 #[repr(C)]
 pub struct Draw {
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     #[bw(calc(codes.len() as u8))]
     codes_size: u8,
     #[br(count = codes_size)]
@@ -662,7 +662,7 @@ pub struct Damage {
 #[message(gm, flag = 92)]
 #[repr(C)]
 pub struct Recover {
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     pub value: i32
 }
 
@@ -680,7 +680,7 @@ pub struct Equip {
 #[message(gm, flag = 94)]
 #[repr(C)]
 pub struct Lpupdate {
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     pub lp: i32
 }
 
@@ -715,7 +715,7 @@ pub struct CancelTarget {
 #[message(gm, flag = 100)]
 #[repr(C)]
 pub struct PayLpcost {
-    pub player: Netplayer,
+    pub player: LocalPlayer,
     pub cost: i32
 }
 
@@ -756,7 +756,7 @@ pub struct Battle {
     pub attacker: CardPosition<false, true, false>,
     pub attacker_attack: i32,
     pub attacker_defense: i32,
-    pub denfenser_a: i8, // ???
+    pub defenser_a: i8, // ???
     pub defenser: CardPosition<false, true, false>,
     pub defenser_attack: i32,
     pub defenser_defense: i32,
@@ -854,7 +854,7 @@ pub struct HandResult {
 #[repr(C)]
 pub struct AnnounceRace {
     pub player: LocalPlayer,
-    pub annount_count: i8,
+    pub announce_count: i8,
     pub available: i32
 }
 
@@ -864,7 +864,7 @@ pub struct AnnounceRace {
 #[repr(C)]
 pub struct AnnounceAttribute {
     pub player: LocalPlayer,
-    pub annount_count: i8,
+    pub announce_count: i8,
     pub available: i32
 }
 

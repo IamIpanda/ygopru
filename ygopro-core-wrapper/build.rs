@@ -1,0 +1,46 @@
+use glob::glob;
+use std::env;
+use std::path::PathBuf;
+
+fn main() {
+    let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let ocgcore_dir = root.join("ocgcore");
+    let lua_dir = root.join("lua");
+
+    if !ocgcore_dir.exists() {
+        panic!(
+            "ocgcore not found at {}. Please run: git submodule update --init",
+            ocgcore_dir.display()
+        );
+    }
+
+    let mut build = cc::Build::new();
+
+    // Compile Lua C files
+    for entry in glob(lua_dir.join("*.c").to_str().unwrap()).unwrap() {
+        let path = entry.unwrap();
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        if filename != "lua.c" && filename != "luac.c" {
+            build.file(&path);
+        }
+    }
+
+    // Compile ocgcore C++ files
+    build.cpp(true);
+    build.flag_if_supported("-std=c++14");
+    build.include(&ocgcore_dir);
+    build.include(&lua_dir);
+
+    if cfg!(target_os = "macos") {
+        build.flag("-Wno-deprecated-declarations");
+    }
+
+    for entry in glob(ocgcore_dir.join("*.cpp").to_str().unwrap()).unwrap() {
+        let path = entry.unwrap();
+        build.file(&path);
+    }
+
+    build.file(root.join("src").join("shuffle_deck.cpp"));
+
+    build.compile("ygopro-core");
+}

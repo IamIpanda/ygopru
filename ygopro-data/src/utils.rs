@@ -2,7 +2,7 @@ pub mod string {
     #![allow(dead_code)]
 
     use std::ops::Deref;
-    use once_cell::sync::OnceCell;
+    use std::sync::OnceLock;
 
     use binrw::BinRead;
     use binrw::BinWrite;
@@ -44,7 +44,7 @@ pub mod string {
     pub struct FixedLengthString<const L: usize> {
         data: [u16; L],
         #[brw(ignore)]
-        str: OnceCell<String>
+        str: OnceLock<String>
     }
 
     impl<const L: usize> std::fmt::Display for FixedLengthString<L> {
@@ -62,10 +62,12 @@ pub mod string {
 
     impl<const L: usize> FixedLengthString<L> {
         pub fn new(str: String) -> Self {
-            Self {
+            let this = Self {
                 data: cast_to_fix_length_array(&str),
-                str: OnceCell::with_value(str)
-            }
+                str: OnceLock::new()
+            };
+            this.str.set(str).ok();
+            this
         }
 
         pub fn resolve_data(&mut self) {
@@ -87,10 +89,7 @@ pub mod string {
         type Target = str;
 
         fn deref(&self) -> &Self::Target {
-            self.str
-                .get_or_try_init(|| cast_to_string(&self.data).ok_or(""))
-                .map(|s| s.as_str())
-                .unwrap_or("")
+            self.str.get_or_init(|| cast_to_string(&self.data).unwrap_or_default()).as_str()
         }
     }
 
@@ -111,7 +110,7 @@ pub mod string {
         #[br(parse_with=until_eof)]
         data: Vec<u16>,
         #[brw(ignore)]
-        str: OnceCell<String>,
+        str: OnceLock<String>,
     }
 
     impl std::fmt::Debug for U16String {
@@ -130,10 +129,12 @@ pub mod string {
 
     impl U16String {
         pub fn new(str: String) -> Self {
-            Self {
+            let this = Self {
                 data: cast_to_c_array(&str),
-                str: OnceCell::with_value(str)
-            }
+                str: OnceLock::new()
+            };
+            this.str.set(str).ok();
+            this
         }
 
         pub fn resolve_data(&self) {
@@ -155,10 +156,7 @@ pub mod string {
         type Target = str;
 
         fn deref(&self) -> &Self::Target {
-            self.str
-                .get_or_try_init(|| cast_to_string(&self.data).ok_or(""))
-                .map(|s| s.as_str())
-                .unwrap_or("")
+            self.str.get_or_init(|| cast_to_string(&self.data).unwrap_or_default()).as_str()
         }
     }
 
@@ -178,9 +176,71 @@ pub mod string {
         fn from(value: &'s [u16]) -> Self {
             U16String {
                 data: value.to_vec(),
-                str: OnceCell::new()
+                str: OnceLock::new()
             }
         }
     }
 }
 
+pub mod complex {
+    use std::io::Cursor;
+    use std::io::Write;
+    use std::ops::Deref;
+    use std::sync::OnceLock;
+
+    use binrw::BinRead;
+    use binrw::BinWrite;
+    use bytes::Bytes;
+
+    /// Lazy-deserialized message. Holds raw `Bytes` until first access,
+    /// then parses into `Message` once and caches the result via `OnceLock`.
+    /// When writing, always uses the original raw bytes — never re-serializes.
+    pub struct Complex<Message> {
+        data: Bytes,
+        message: OnceLock<Message>,
+    }
+
+    impl<Message: BinRead> Complex<Message> where for<'a> <Message as BinRead>::Args<'a>: Default {
+        pub fn new(data: Bytes) -> Self {
+            Self {
+                data,
+                message: OnceLock::new(),
+            }
+        }
+
+        pub fn from_message(message: Message) -> Self where Message: BinWrite,for<'a> <Message as BinWrite>::Args<'a>: Default {
+            let mut cursor = Cursor::new(Vec::new());
+            message.write_le(&mut cursor).expect("failed to serialize Complex message");
+            Self::new(Bytes::from(cursor.into_inner()))
+        }
+
+        pub fn bytes(&self) -> &Bytes {
+            &self.data
+        }
+
+        pub fn try_get(&self) -> Result<&Message, binrw::Error> {
+            if let Some(message) = self.message.get() {
+                return Ok(message);
+            }
+            let message = Message::read_le(&mut Cursor::new(&self.data))?;
+            Ok(self.message.get_or_init(|| message))
+        }
+    }
+
+    impl<Message: BinRead> Deref for Complex<Message> where
+        for<'a> <Message as BinRead>::Args<'a>: Default,
+    {
+        type Target = Message;
+
+        fn deref(&self) -> &Self::Target {
+            self.try_get().expect("failed to deserialize Complex message")
+        }
+    }
+    impl<Message: BinWrite> BinWrite for Complex<Message> {
+        type Args<'a> = <Message as BinWrite>::Args<'a>;
+
+        fn write_options<W: Write>(&self, writer: &mut W, _endian: binrw::Endian, _args: Self::Args<'_>) -> binrw::BinResult<()> {
+            writer.write_all(&self.data).map_err(binrw::Error::from)
+        }
+    }
+}

@@ -1,0 +1,12 @@
+[package]
+name = "ygopro-core-wrapper"
+version = "0.1.0"
+edition = "2024"
+links = "ygopro-core"
+
+[dependencies]
+ygopro-data = { path = "../ygopro-data" }
+
+[build-dependencies]
+cc = "1"
+glob = "0.3"

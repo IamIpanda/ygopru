@@ -24,8 +24,6 @@ pub enum Message {
     Other((&'static str, Box<dyn std::any::Any + Send + Sync>))
 }
 
-pub type MessageComplex<Source> = crate::message::MessageComplex<Source, MessageType, Message>;
-
 impl From<server_to_client::MessageType> for MessageType {
     fn from(value: server_to_client::MessageType) -> Self {
         Self::STOC(value)
@@ -57,9 +55,9 @@ impl From<MessageType> for u8 {
 #[macro_export]
 macro_rules! every_message {
     ($ident: path) => {
-        ygopro::every_client_to_server_message!($ident);
-        ygopro::every_server_to_client_message!($ident);
-        ygopro::every_game_message_message!($ident);
+        ygopro_data::every_client_to_server_message!($ident);
+        ygopro_data::every_server_to_client_message!($ident);
+        ygopro_data::every_game_message_message!($ident);
     };
 }
 

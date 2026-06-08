@@ -61,23 +61,24 @@ fn generate_content(name: OsString, structs: Vec<syn::ItemStruct>) {
     let macro_calls_long = format(&format!("ygopro::message::{}::", module_name));
 
     let content = format!("
-macro_rules! every_message {{
+#[macro_export]
+macro_rules! every_{0}_flat_message {{
     ($macro_name:path) => {{
         $macro_name!(
-            {}
+            {1}
         );
     }};
 }}
 
 #[macro_export]
-macro_rules! every_{}_message {{
+macro_rules! every_{0}_message {{
     ($macro_name:path) => {{
         $macro_name!(
-            {}
+            {2}
         );
     }};
 }}
-    ", macro_calls_simple, module_name, macro_calls_long);
+    ", module_name, macro_calls_simple, macro_calls_long);
     
     write_file(name, content)
 }
@@ -90,7 +91,7 @@ fn write_file(name: OsString, content: String) {
 }
 
 fn main() -> io::Result<()>{
-    let path = std::env::var_os("CARGO_MANIFEST_DIR").expect("cannot find cargo minifest directory");
+    let path = std::env::var_os("CARGO_MANIFEST_DIR").expect("cannot find cargo manifest directory");
     scan_dir(PathBuf::from(path).join("src").into_os_string()).ok();
     Ok(())
 }

@@ -1,67 +1,73 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
-use std::str::FromStr;
-use std::path::PathBuf;
-use once_cell::sync::OnceCell;
+use std::fs;
+use std::io;
+use std::path::Path;
 
+#[derive(Debug, Clone)]
 pub struct LFList {
-    name: String,
-    limits: HashMap<u32, u8>
+    pub hash: u32,
+    pub name: String,
+    pub content: HashMap<u32, u8>,
 }
 
-pub static LFLISTS: OnceCell<Vec<LFList>> = OnceCell::new();
-
 impl LFList {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            limits: HashMap::new()
-        }
-    } 
-
-    fn from_file(path: PathBuf) -> std::io::Result<Vec<Self>> {
-        let mut file = File::open(path)?;
-        let mut buf = String::new();
-        file.read_to_string(&mut buf)?;
-        Ok(Self::from_string(&buf))
+    pub fn new(name: String, content: HashMap<u32, u8>) -> Self {
+        let hash = {
+            let mut h: u32 = 5381;
+            for &byte in name.as_bytes() {
+                h = h.wrapping_mul(33).wrapping_add(byte as u32);
+            }
+            h
+        };
+        Self { hash, name, content }
     }
+}
 
-    fn from_string(str: &str) -> Vec<Self> {
-        const BIG_BOOM_LFLIST_NAME: &'static str = "__BIG_BOOM__";
-        let mut loaded_lflists = Vec::new();
-        let mut current_lflist = LFList::new(BIG_BOOM_LFLIST_NAME.to_string());
-        for line in str.split("\n") {
-            if line.starts_with("#") {
-                continue;
-            } else if line.starts_with("!") {
-                if current_lflist.name != BIG_BOOM_LFLIST_NAME {
-                    loaded_lflists.push(current_lflist);
-                }
-                current_lflist = LFList::new(line[1..].to_string());
-            } else {
-                let parts = line.split(" ").collect::<Vec<&str>>();
-                if parts.len() < 2 { continue; }
-                let card_id = u32::from_str(parts[0]);
-                let limit = u8::from_str(parts[1]);
-                if let (Ok(card_id), Ok(limit)) = (card_id, limit) {
-                    current_lflist.limits.insert(card_id, limit);
+pub fn load_lflist_single(path: &Path) -> io::Result<Vec<LFList>> {
+    let content = fs::read_to_string(path)?;
+    Ok(parse_lflist_content(&content))
+}
+
+pub fn load_lflist_all() -> io::Result<Vec<LFList>> {
+    let lflist_path = Path::new("lflist.conf");
+    if !lflist_path.exists() {
+        let expansion_dir = Path::new("expansions");
+        let mut lists = Vec::new();
+        if expansion_dir.is_dir() {
+            for entry in fs::read_dir(expansion_dir)? {
+                let path = entry?.path();
+                if path.extension().map_or(false, |e| e == "conf") {
+                    if let Ok(l) = load_lflist_single(&path) { lists.extend(l); }
                 }
             }
         }
-        loaded_lflists
+        if lists.is_empty() && lflist_path.exists() {
+            return load_lflist_single(lflist_path);
+        }
+        return Ok(lists);
     }
+    load_lflist_single(lflist_path)
+}
 
-    pub fn init() -> Vec<Self> {
-        todo!();
-    }
-
-    pub fn first_tcg() -> i32 {
-        for (index, lflist) in LFLISTS.get_or_init(LFList::init).iter().enumerate() {
-            if lflist.name.ends_with("TCG") {
-                return index as i32;
+fn parse_lflist_content(content: &str) -> Vec<LFList> {
+    let mut lists = Vec::new();
+    let mut name = String::new();
+    let mut limits = HashMap::new();
+    for line in content.lines().map(|l| l.trim()) {
+        if line.is_empty() || line.starts_with('#') { continue; }
+        if line.starts_with('!') {
+            if !name.is_empty() { lists.push(LFList::new(std::mem::take(&mut name), std::mem::take(&mut limits))); }
+            name = line[1..].to_string();
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(3, |c| c == ' ' || c == '\t').collect();
+        if parts.len() >= 2 {
+            if let (Ok(id), Ok(limit)) = (u32::from_str_radix(parts[0].trim(), 10), parts[1].trim().parse::<u8>()) {
+                if limit <= 3 { limits.insert(id, limit); }
             }
         }
-        return -1;
-    } 
+    }
+    if !name.is_empty() { lists.push(LFList::new(name, limits)); }
+    if !lists.is_empty() { lists.push(LFList::new("N/A".to_string(), HashMap::new())); }
+    lists
 }

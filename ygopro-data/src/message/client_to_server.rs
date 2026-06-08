@@ -13,7 +13,7 @@ use crate::utils::string::{FixedLengthString, U16String};
 
 
 include!(concat!(env!("OUT_DIR"), "/client_to_server.rs"));
-every_message!(generate_enum);
+every_client_to_server_flat_message!(generate_enum);
 
 #[derive(BinRead, BinWrite, Debug, Message)]
 #[message(ctos, flag = 1)]

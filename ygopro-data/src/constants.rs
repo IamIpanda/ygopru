@@ -39,7 +39,11 @@ impl std::default::Default for Netplayer {
 #[repr(u8)]
 pub enum LocalPlayer {
     FirstPlayer = 0,
-    SecondPlayer = 1
+    SecondPlayer = 1,
+    None = 2,
+    All = 3,
+    /// This value is only used as `reason_player` when reason is rule.
+    Rule = 5,
 }
 
 // Great fukcing structure design need great adapter codes.
@@ -102,21 +106,6 @@ impl std::convert::From<&PlayerChange> for u8 {
     }
 }
 
-/*
-impl serde::Serialize for PlayerChange {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-        serializer.serialize_u8(self.as_u8())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for PlayerChange {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
-        let value = <u8 as serde::Deserialize>::deserialize(deserializer)?;
-        PlayerChange::try_from_primitive(value).map_err(|_| serde::de::Error::custom("Invalid playerchange value"))
-    }
-}
-*/
-
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
 #[brw(repr=u8)]
 #[repr(u8)]
@@ -137,6 +126,7 @@ pub enum Mode {
 }
 
 bitflags! {
+    #[repr(transparent)]
     #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
@@ -174,107 +164,9 @@ pub enum Position {
     // NoFlipEffect = 65536
 }
 
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive, IntoPrimitive, Debug, Hash)]
-#[brw(repr=u8)]
-#[repr(u8)]
-pub enum GameMessage {
-    Retry = 1,
-    Hint = 2,
-    Waiting = 3,
-    Start = 4,
-    Win = 5,
-    UpdateData = 6,
-    UpdateCard = 7,
-    RequestDeck = 8,
-    SelectBattlecmd = 10,
-    SelectIdlecmd = 11,
-    SelectEffectyn = 12,
-    SelectYesno = 13,
-    SelectOption = 14,
-    SelectCard = 15,
-    SelectChain = 16,
-    SelectPlace = 18,
-    SelectPosition = 19,
-    SelectTribute = 20,
-    SortChain = 21,
-    SelectCounter = 22,
-    SelectSum = 23,
-    SelectDisfield = 24,
-    SortCard = 25,
-    SelectUnselectCard = 26,
-    ConfirmDecktop = 30,
-    ConfirmCards = 31,
-    ShuffleDeck = 32,
-    ShuffleHand = 33,
-    RefreshDeck = 34,
-    SwapGraveDeck = 35,
-    ShuffleSetCard = 36,
-    ReverseDeck = 37,
-    DeckTop = 38,
-    MsgShuffleExtra = 39,
-    NewTurn = 40,
-    NewPhase = 41,
-    ConfirmExtratop = 42,
-    Move = 50,
-    PosChange = 53,
-    Set = 54,
-    Swap = 55,
-    FieldDisabled = 56,
-    Summoning = 60,
-    Summoned = 61,
-    Spsummoning = 62,
-    Spsummoned = 63,
-    Flipsummoning = 64,
-    Flipsummoned = 65,
-    Chaining = 70,
-    Chained = 71,
-    ChainSolving = 72,
-    ChainSolved = 73,
-    ChainEnd = 74,
-    ChainNegated = 75,
-    ChainDisabled = 76,
-    CardSelected = 80,
-    RandomSelected = 81,
-    BecomeTarget = 83,
-    Draw = 90,
-    Damage = 91,
-    Recover = 92,
-    Equip = 93,
-    Lpupdate = 94,
-    Unequip = 95,
-    CardTarget = 96,
-    CancelTarget = 97,
-    PayLpcost = 100,
-    AddCounter = 101,
-    RemoveCounter = 102,
-    Attack = 110,
-    Battle = 111,
-    AttackDisabled = 112,
-    DamageStepStart = 113,
-    DamageStepEnd = 114,
-    MissedEffect = 120,
-    BeChainTarget = 121,
-    CreateRelation = 122,
-    ReleaseRelation = 123,
-    TossCoin = 130,
-    TossDice = 131,
-    RockPaperScissors = 132,
-    HandRes = 133,
-    AnnounceRace = 140,
-    AnnounceAttrib = 141,
-    AnnounceCard = 142,
-    AnnounceNumber = 143,
-    CardHint = 160,
-    TagSwap = 161,
-    ReloadField = 162,
-    AiName = 163,
-    ShowHint = 164,
-    MatchKill = 170,
-    CustomMsg = 180,
-}
-
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Timing: u32 {
@@ -308,7 +200,8 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Type: u32 {
@@ -342,7 +235,8 @@ bitflags! {
 
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Race: u32 {
@@ -370,13 +264,15 @@ bitflags! {
         const Devine = 2097152;
         const Creatorgod = 4194304;
         const Wyrm = 8388608;
-        const Cybers = 16777216;
+        const Cyberse = 16777216;
+        const Illusion = 33554432;
     }
 }
 
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Reason: u32 {
@@ -408,11 +304,14 @@ bitflags! {
         const Reveal = 0x8000000;
         const Link = 0x10000000;
         const LostOverlay = 0x20000000;
+        const Maintenance = 0x40000000;
+        const Action = 0x80000000;
     }
 }
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Status: u32 {
@@ -424,7 +323,7 @@ bitflags! {
         const NoLevel = 0x0020;
         const BattleResult = 0x0040;
         const SpsummonStep = 0x0080;
-        const FormChanged = 0x0100;
+        const CannotChangeForm = 0x0100;
         const Summoning = 0x0200;
         const EffectEnabled = 0x0400;
         const SummonTurn = 0x0800;
@@ -436,10 +335,10 @@ bitflags! {
         const SummonDisabled = 0x20000;
         const ActivateDisabled = 0x40000;
         const EffectReplaced = 0x80000;
-        const FutureFusion = 0x100000;
+        const FlipSummoning = 0x100000;
         const AttackCanceled = 0x200000;
         const Initializing = 0x400000;
-        const Activated = 0x800000;
+        const ToHandWithoutConfirm = 0x800000;
         const JustPos = 0x1000000;
         const ContinuousPos = 0x2000000;
         const Forbidden = 0x4000000;
@@ -447,11 +346,13 @@ bitflags! {
         const OppoBattle = 0x10000000;
         const FlipSummonTurn = 0x20000000;
         const SpsummonTurn = 0x40000000;
+        const FlipSummonDisabled = 0x80000000;
     }
 }
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Query: u32 {
@@ -482,7 +383,8 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Attribute: u32 {
@@ -498,7 +400,8 @@ bitflags! {
 
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Linkmarkers: u32 {
@@ -558,7 +461,7 @@ pub enum Hint {
     Opselected = 4,
     Effect = 5,
     Race = 6,
-    Attribite = 7,
+    Attribute = 7,
     Code = 8,
     Number = 9,
     Card = 10,
@@ -583,7 +486,8 @@ pub enum Phase {
 
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Copy, Debug)]
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct SummonType: u32 {
@@ -608,4 +512,138 @@ pub enum Hand {
     Scissor = 1,
     Rock = 2,
     Paper = 3
+}
+
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
+    #[br(map=|x| Self::from_bits_retain(x))]
+    #[bw(map=|x: &Self| x.bits())]
+    pub struct OT: u32 {
+        const OCG = 0x1;
+        const TCG = 0x2;
+    }
+}
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
+    #[br(map=|x| Self::from_bits_retain(x))]
+    #[bw(map=|x: &Self| x.bits())]
+    pub struct Category: u32 {
+        const CATEGORY_1 = 0x1;
+        const CATEGORY_2 = 0x2;
+        const CATEGORY_3 = 0x4;
+        const CATEGORY_4 = 0x8;
+        const CATEGORY_5 = 0x10;
+        const CATEGORY_6 = 0x20;
+        const CATEGORY_7 = 0x40;
+        const CATEGORY_8 = 0x80;
+        const CATEGORY_9 = 0x100;
+        const CATEGORY_10 = 0x200;
+        const CATEGORY_11 = 0x400;
+        const CATEGORY_12 = 0x800;
+        const CATEGORY_13 = 0x1000;
+        const CATEGORY_14 = 0x2000;
+        const CATEGORY_15 = 0x4000;
+        const CATEGORY_16 = 0x8000;
+        const CATEGORY_17 = 0x10000;
+        const CATEGORY_18 = 0x20000;
+        const CATEGORY_19 = 0x40000;
+        const CATEGORY_20 = 0x80000;
+        const CATEGORY_21 = 0x100000;
+        const CATEGORY_22 = 0x200000;
+        const CATEGORY_23 = 0x400000;
+        const CATEGORY_24 = 0x800000;
+        const CATEGORY_25 = 0x1000000;
+        const CATEGORY_26 = 0x2000000;
+        const CATEGORY_27 = 0x4000000;
+        const CATEGORY_28 = 0x8000000;
+        const CATEGORY_29 = 0x10000000;
+        const CATEGORY_30 = 0x20000000;
+        const CATEGORY_31 = 0x40000000;
+        const CATEGORY_32 = 0x80000000;
+    }
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr=u32)]
+#[repr(u32)]
+pub enum OperationCode {
+    Add = 0x40000000,
+    Subtract = 0x40000001,
+    Multiply = 0x40000002,
+    Divide = 0x40000003,
+    And = 0x40000004,
+    Or  = 0x40000005,
+    Negate = 0x40000006,
+    Not = 0x40000007,
+    IsCode = 0x40000100,
+    IsSetcard = 0x40000101,
+    IsType = 0x40000102,
+    IsRace = 0x40000103,
+    IsAttribute = 0x40000104,
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr=u8)]
+#[repr(u8)]
+pub enum MasterRule {
+    MasterRule1 = 1,
+    MasterRule2 = 2,
+    MasterRule3 = 3,
+    MasterRuleNew = 4,
+    MasterRule2020 = 5,
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr=u8)]
+#[repr(u8)]
+pub enum Activity {
+    Summon = 1,
+    NormalSummon = 2,
+    SpecialSummon = 3,
+    FlipSummon = 4,
+    Attack = 5,
+    BattlePhase = 6,
+    Chain = 7,
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr=u8)]
+#[repr(u8)]
+pub enum CardHint {
+    Turn = 1,
+    Card = 2,
+    Race = 3,
+    Attribute = 4,
+    Number = 5,
+    DescriptionAdd = 6,
+    DescriptionRemove = 7,
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr=u8)]
+#[repr(u8)]
+pub enum PlayerHint {
+    DescriptionAdd = 6,
+    DescriptionRemove = 7,
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr=u8)]
+#[repr(u8)]
+pub enum EffectDescription {
+    Operation = 1,
+    Reset = 2,
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr=i8)]
+#[repr(i8)]
+pub enum OperationResult {
+    Canceled = -1,
+    Fail = 0,
+    Success = 1,
 }

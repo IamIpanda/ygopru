@@ -16,7 +16,7 @@ use crate::utils::string::U16String;
 use super::HostInfo;
 
 include!(concat!(env!("OUT_DIR"), "/server_to_client.rs"));
-every_message!(generate_enum);
+every_server_to_client_flat_message!(generate_enum);
 
 #[derive(BinRead, BinWrite, Debug, Message)]
 #[message(stoc, flag = 1)]

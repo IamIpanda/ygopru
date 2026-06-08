@@ -15,8 +15,14 @@ use lzma_rs::lzma_decompress_with_options;
 use crate::constants::Mode;
 use crate::message::HostInfo;
 use crate::utils::string::FixedLengthString;
+use crate::data::ReplayDeck;
 
-use super::ReplayDeck;
+const SIZE_REPLAY_SEED: usize = 8;
+
+enum ReplayVersion {
+    V1 = 0x31707279,
+    V2 = 0x32707279
+}
 
 bitflags! {
     #[derive(BinRead, BinWrite, Clone, Debug)]
@@ -47,6 +53,17 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(BinRead, BinWrite, Clone, Debug)]
+    #[br(map=|x: u32| Self::from_bits_retain(x))]
+    #[bw(map=|x: &Self| x.bits())]
+    pub struct ReplayMode: u32 {
+        const SaveInServer = 1;
+        const WatcherNoSend = 2;
+        const IncludeChat = 4;
+    }
+}
+
 #[derive(BinRead, BinWrite, Clone, Debug)]
 pub struct ReplayHeader {
     pub id: u32,
@@ -55,23 +72,37 @@ pub struct ReplayHeader {
     pub seed: u32,
     pub data_size: u32,
     pub start_time: u32,
-    pub props: [u8; 8]
+    pub props: [u8; 8],
+    #[br(if(id == ReplayVersion::V2 as u32))]
+    #[bw(if(*id == ReplayVersion::V2 as u32))]
+    pub seed_sequence: [u32; SIZE_REPLAY_SEED],
+    #[br(if(id == ReplayVersion::V2 as u32))]
+    #[bw(if(*id == ReplayVersion::V2 as u32))]
+    pub header_version: u32,
+    #[br(if(id == ReplayVersion::V2 as u32))]
+    #[bw(if(*id == ReplayVersion::V2 as u32))]
+    pub reserved: [u32; 3],
 }
 
 impl ReplayHeader {
     pub fn is_compressed(&self) -> bool { self.flag.contains(ReplayHeaderFlags::Compressed) }
     pub fn is_tag(&self)        -> bool { self.flag.contains(ReplayHeaderFlags::Tag) }
     pub fn is_decoded(&self)    -> bool { self.flag.contains(ReplayHeaderFlags::Decode) }
+    pub fn is_single_mode(&self)-> bool { self.flag.contains(ReplayHeaderFlags::SingleMode) }
+    pub fn is_uniform(&self)    -> bool { self.flag.contains(ReplayHeaderFlags::Uniform) }
 }
 
 #[binrw]
 #[derive(Clone, Debug)]
 #[br(import(header: &ReplayHeader))]
+#[bw(import(header: &ReplayHeader))]
 pub struct ReplayBody {
     pub host_name: FixedLengthString<20>,
     #[br(if(header.is_tag()))]
+    #[bw(if(header.is_tag()))]
     pub tag_host_name: Option<FixedLengthString<20>>,
     #[br(if(header.is_tag()))]
+    #[bw(if(header.is_tag()))]
     pub tag_client_name: Option<FixedLengthString<20>>,
     pub client_name: FixedLengthString<20>,
     pub start_lp: u32,
@@ -82,8 +113,10 @@ pub struct ReplayBody {
     pub duel_rule: u16,
     pub host_deck: ReplayDeck,
     #[br(if(header.is_tag()))]
+    #[bw(if(header.is_tag()))]
     pub tag_host_deck: Option<ReplayDeck>,
     #[br(if(header.is_tag()))]
+    #[bw(if(header.is_tag()))]
     pub tag_client_deck: Option<ReplayDeck>,
     pub client_deck: ReplayDeck,
     #[br(parse_with=until_eof)]
@@ -108,17 +141,17 @@ pub struct Replay {
 }
 
 impl Replay {
-    pub fn duel_rule(&self) -> u8 { 
-        if self.duel_options.contains(DuelOptions::ObsoleteRuling) { return 1 }
-        return self.duel_rule as u8; 
+    pub fn duel_rule(&self) -> crate::constants::MasterRule { 
+        if self.duel_options.contains(DuelOptions::ObsoleteRuling) { crate::constants::MasterRule::MasterRule1 }
+        else { crate::constants::MasterRule::try_from(self.duel_rule as u8).unwrap_or(crate::constants::MasterRule::MasterRule1) }
     }
 
     pub fn mode(&self) -> Mode {
-        if self.duel_options.contains(DuelOptions::TagMode) { return Mode::Tag; }
-        return Mode::Single;
+        if self.duel_options.contains(DuelOptions::TagMode) { Mode::Tag }
+        else { Mode::Single }
     } 
-    pub fn no_shuffle_deck(&self) -> bool { return self.duel_options.contains(DuelOptions::PseudoShuffle); }
-    pub fn is_tag(&self) -> bool { return self.duel_options.contains(DuelOptions::TagMode); }
+    pub fn no_shuffle_deck(&self) -> bool { self.duel_options.contains(DuelOptions::PseudoShuffle) }
+    pub fn is_tag(&self) -> bool { self.duel_options.contains(DuelOptions::TagMode) }
 
     pub fn host_info(&self) -> HostInfo {
         HostInfo { 
@@ -140,7 +173,7 @@ impl Deref for Replay {
     type Target = ReplayBody;
 
     fn deref(&self) -> &Self::Target {
-        return &self.body;
+        &self.body
     }
 }
 
@@ -181,7 +214,7 @@ fn replay_parser(header: &ReplayHeader) -> BinResult<ReplayBody> {
 #[binrw::writer(writer, endian)]
 fn replay_writer(body: &ReplayBody, header: &ReplayHeader) -> BinResult<()> {
     let mut decompressed_data = Cursor::new(Vec::new());
-    body.write_options(&mut decompressed_data, endian, ())?;
+    body.write_options(&mut decompressed_data, endian, (header,))?;
     let compressed_data = if header.is_compressed() {
         let mut compressed_data = Cursor::new(Vec::new());
         decompressed_data.set_position(0);
@@ -202,7 +235,7 @@ mod test {
 
     #[test]
     fn test_deserialize_replay() {
-       let arr = std::fs::read("/Users/iami/Workshop/download/qq/2023-12-16 12-56-02.yrp").unwrap();
+       let arr = std::fs::read("/Users/iami/Downloads/极羽光_vs_爱尔琳妮_20260531225205_G1.yrp").unwrap();
        let mut reader = Cursor::new(arr);
        let replay = Replay::read_le(&mut reader);
        println!("{:?}", replay);

@@ -3,4 +3,8 @@ resolver = "2"
 members = [
     "ygopro-data",
     "ygopro-derive",
+    #"ygopro-data-extend",
+    "ygopro-core-wrapper",
+    "ygopro-handler",
+    "ygopro"
 ]

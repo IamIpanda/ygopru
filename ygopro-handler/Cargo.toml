@@ -1,0 +1,16 @@
+[package]
+name = "ygopro-handler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anymap3 = "1"
+binrw = "0.13"
+bytes = "1"
+futures = "0"
+hashbrown = "0"
+pin-project-lite = "0"
+tokio = { version = "1", features = ["sync", "rt", "macros", "rt-multi-thread"] }
+tokio-stream = "0"
+tower = { version = "0", features = ["util"] }
+ygopro-data = { path = "../ygopro-data" }
