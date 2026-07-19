@@ -14,24 +14,24 @@ pub struct Request<Message> {
     pub client_addr: SocketAddr,
 }
 
-impl<Message, Res> FromRequest<Request<Message>, Res> for SocketAddr
+impl<Message, State, Res> FromRequest<Request<Message>, State, Res> for SocketAddr
 where
-    Message: Send + 'static,
-    Res: Send + 'static,
+    Message: Send,
+    State: Send + Sync,
+    Res: Send,
 {
-    fn from_request(bundle: &mut Bundle<Request<Message>, Res>) -> Option<Self> {
+    fn from_request(bundle: &mut Bundle<Request<Message>, State, Res>) -> Option<Self> {
         Some(bundle.request.client_addr)
     }
 }
 
-impl<Message, Res> FromRequest<Request<Message>, Res> for &Message
+impl<Message, State, Res> FromRequest<Request<Message>, State, Res> for &Message
 where
-    Message: Send + 'static,
-    Res: Send + 'static,
+    Message: Send,
+    State: Send + Sync,
+    Res: Send,
 {
-    fn from_request(bundle: &mut Bundle<Request<Message>, Res>) -> Option<Self> {
-        // SAFETY: sync handler consumes this reference within call(), not
-        // capturing it in Ready. The Bundle outlives all uses.
+    fn from_request(bundle: &mut Bundle<Request<Message>, State, Res>) -> Option<Self> {
         Some(unsafe { &*(&bundle.request.message as *const Message) })
     }
 }
@@ -107,11 +107,12 @@ impl IntoResponse<Response<ctos::Message>> for ctos::Message {
 
 macro_rules! impl_variant_ref {
     ($message_mod:ident, $variant:ident) => {
-        impl<Res> FromRequest<Request<$message_mod::Message>, Res> for &$message_mod::$variant
+        impl<State, Res> FromRequest<Request<$message_mod::Message>, State, Res> for &$message_mod::$variant
         where
-            Res: Send + 'static,
+            State: Send + Sync,
+            Res: Send,
         {
-            fn from_request(bundle: &mut Bundle<Request<$message_mod::Message>, Res>) -> Option<Self> {
+            fn from_request(bundle: &mut Bundle<Request<$message_mod::Message>, State, Res>) -> Option<Self> {
                 if let $message_mod::Message::$variant(inner) = &bundle.request.message {
                     Some(unsafe { &*(inner as *const $message_mod::$variant) })
                 } else {
@@ -140,11 +141,12 @@ macro_rules! impl_stoc {
 
 macro_rules! impl_variant_complex_ref {
     ($message_mod:ident, $variant:ident) => {
-        impl<Res> FromRequest<Request<Complex<$message_mod::Message>>, Res> for &$message_mod::$variant
+        impl<State, Res> FromRequest<Request<Complex<$message_mod::Message>>, State, Res> for &$message_mod::$variant
         where
-            Res: Send + 'static,
+            State: Send + Sync,
+            Res: Send,
         {
-            fn from_request(bundle: &mut Bundle<Request<Complex<$message_mod::Message>>, Res>) -> Option<Self> {
+            fn from_request(bundle: &mut Bundle<Request<Complex<$message_mod::Message>>, State, Res>) -> Option<Self> {
                 if let $message_mod::Message::$variant(inner) = &*bundle.request.message {
                     Some(unsafe { &*std::ptr::from_ref(inner) })
                 } else {

@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
+use std::sync::LazyLock;
 
-use once_cell::sync::Lazy;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -14,4 +14,4 @@ pub struct Config {
     pub port: u32
 }
 
-pub static CONFIG: Lazy<Config> = Lazy::new(|| Config::parse());
+pub static CONFIG: LazyLock<Config> = LazyLock::new(|| Config::parse());

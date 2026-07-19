@@ -11,3 +11,6 @@ ygopro-handler本质上是对ygopro和srvpro的抽象层。你应该谨慎。
 我应该正确处理观战者的逻辑。
 4. 完成srvpro.
 我应该正确处理掉线重连的逻辑。
+---
+Replay应该是RoundTrip的。
+Request应该是RoundTrip的。

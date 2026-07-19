@@ -5,6 +5,7 @@ use binrw::BinRead;
 use binrw::BinWrite;
 use num_enum::IntoPrimitive;
 use num_enum::TryFromPrimitive;
+use num_enum::FromPrimitive;
 use bitflags::bitflags;
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
@@ -26,24 +27,109 @@ pub enum Netplayer {
     Player5 = 4,
     Player6 = 5,
     Observer = 7,
+    // Extended by ygopro-data
+    None = 254,
+    All = 255
 }
 
 impl std::default::Default for Netplayer {
     fn default() -> Self {
-        return Netplayer::Observer;
+        return Netplayer::None;
     }
 }
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug, PartialOrd, Ord, Hash)]
 #[brw(repr=u8)]
 #[repr(u8)]
-pub enum LocalPlayer {
-    FirstPlayer = 0,
-    SecondPlayer = 1,
+pub enum CorePlayer {
+    FirstAttackPlayer = 0,
+    SecondAttackPlayer = 1,
     None = 2,
     All = 3,
     /// This value is only used as `reason_player` when reason is rule.
     Rule = 5,
+}
+
+impl CorePlayer {
+    pub fn opponent(&self) -> CorePlayer {
+        match *self {
+            CorePlayer::FirstAttackPlayer => CorePlayer::SecondAttackPlayer,
+            CorePlayer::SecondAttackPlayer => CorePlayer::FirstAttackPlayer,
+            CorePlayer::None => CorePlayer::None,
+            CorePlayer::All => CorePlayer::All,
+            CorePlayer::Rule => CorePlayer::Rule,
+        }
+    }
+}
+
+impl From<Netplayer> for CorePlayer {
+    fn from(player: Netplayer) -> Self {
+        match player {
+            Netplayer::Player1 | Netplayer::Player3 | Netplayer::Player5 => CorePlayer::FirstAttackPlayer,
+            Netplayer::Player2 | Netplayer::Player4 | Netplayer::Player6 => CorePlayer::SecondAttackPlayer,
+            Netplayer::Observer => CorePlayer::None,
+            Netplayer::None => CorePlayer::None,
+            Netplayer::All => CorePlayer::All,
+        }
+    }
+}
+
+impl From<CorePlayer> for Netplayer {
+    fn from(player: CorePlayer) -> Self {
+        match player {
+            CorePlayer::FirstAttackPlayer => Netplayer::Player1,
+            CorePlayer::SecondAttackPlayer => Netplayer::Player2,
+            CorePlayer::None => Netplayer::None,
+            CorePlayer::All => Netplayer::All,
+            CorePlayer::Rule => Netplayer::None,
+        }
+    }
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug)]
+#[brw(repr=u8)]
+pub enum TypeChange {
+    NotHost(Netplayer),
+    Host(Netplayer),
+}
+
+impl TypeChange {
+    fn as_u8(&self) -> u8 {
+        match *self {
+            TypeChange::NotHost(player) => player as u8,
+            TypeChange::Host(player) => player as u8 | 0x10,
+        }
+    }
+}
+
+impl num_enum::TryFromPrimitive for TypeChange {
+    type Primitive = u8;
+    const NAME: &'static str = "TypeChange";
+
+    fn try_from_primitive(source: Self::Primitive) -> Result<Self, Self::Error> {
+        let player = Netplayer::try_from_primitive(source & 0x0f)?;
+        if (source & 0x10) != 0 {
+            Ok(TypeChange::Host(player))
+        } else {
+            Ok(TypeChange::NotHost(player))
+        }
+    }
+
+    type Error = num_enum::TryFromPrimitiveError<Netplayer>;
+}
+
+impl std::convert::TryFrom<u8> for TypeChange {
+    type Error = num_enum::TryFromPrimitiveError<Netplayer>;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::try_from_primitive(value)
+    }
+}
+
+impl std::convert::From<&TypeChange> for u8 {
+    fn from(value: &TypeChange) -> Self {
+        value.as_u8()
+    }
 }
 
 // Great fukcing structure design need great adapter codes.
@@ -106,14 +192,36 @@ impl std::convert::From<&PlayerChange> for u8 {
     }
 }
 
+
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
-#[brw(repr=u8)]
+#[brw(repr = u8)]
+#[repr(u8)]
+pub enum JoinError {
+    RoomFull = 0,
+    WrongPassword = 1,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(u32)]
+pub enum DeckError {
+    Lflist(u32) = 0x1,
+    OcgOnly = 0x2,
+    TcgOnly = 0x3,
+    UnknownCard(u32) = 0x4,
+    CardCount(u32) = 0x5,
+    MainCount(u32) = 0x6,
+    ExtraCount(u32) = 0x7,
+    SideCount(u32) = 0x8,
+    NotAvail = 0x9,
+}
+
+#[derive(Debug, Clone)]
 #[repr(u8)]
 pub enum ErrorMessage {
-    JoinError = 1,
-    DeckError = 2,
+    JoinError(JoinError) = 1,
+    DeckError(DeckError) = 2,
     SideError = 3,
-    VersionError = 4,
+    VersionError(u16) = 4,
 }
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug, Hash)]
@@ -132,19 +240,19 @@ bitflags! {
     #[bw(map=|x: &Self| x.bits())]
     pub struct Location: u8 {
         const Limbo = 0;
-        const Deck = 1;
-        const Hand = 2;
-        const MZone = 4;
-        const SZone = 8;
-        const Grave = 16;
-        const Removed = 32;
-        const Extra = 64;
-        const Overlay = 128;
-        // OnField = 12;
-        // FZone = 256,
-        // PZone = 512,
-        // DeckBot = 65537,
-        // DeckShf = 131073,
+        const Deck = 0x1;
+        const Hand = 0x2;
+        const MZone = 0x4;
+        const SZone = 0x8;
+        const Grave = 0x10;
+        const Removed = 0x20;
+        const Extra = 0x40;
+        const Overlay = 0x80;
+        // OnField = 0xc;
+        // FZone = 0x100,
+        // PZone = 0x200,
+        // DeckBot = 0x10001,
+        // DeckShf = 0x20001,
     }
 }
 
@@ -153,15 +261,21 @@ bitflags! {
 #[repr(u8)]
 pub enum Position {
     Any = 0,
-    FaceupAttack = 1,
-    FaceDownAttack = 2,
-    FaceupDefense = 4,
-    FacedownDefense = 8,
-    Faceup = 5,
-    Facedown = 10,
-    Attack = 3,
-    Defense = 12,
-    // NoFlipEffect = 65536
+    FaceupAttack = 0x1,
+    FaceDownAttack = 0x2,
+    FaceupDefense = 0x4,
+    FacedownDefense = 0x8,
+    Faceup = 0x5,
+    Facedown = 0xa,
+    Attack = 0x3,
+    Defense = 0xc,
+    // NoFlipEffect = 0x10000
+}
+
+impl Position {
+    pub fn is_face_down(&self) -> bool {
+        matches!(self, Position::FaceDownAttack | Position::FacedownDefense | Position::Facedown)
+    }
 }
 
 bitflags! {
@@ -170,32 +284,32 @@ bitflags! {
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Timing: u32 {
-        const DrawPhase = 1;
-        const StandbyPhase = 2;
-        const MainEnd = 4;
-        const BattleStart = 8;
-        const BattleEnd = 16;
-        const EndPhase = 32;
-        const Summon = 64;
-        const Spsummon = 128;
-        const Flipsummon = 256;
-        const Mset = 512;
-        const Sset = 1024;
-        const PosChange = 2048;
-        const Attack = 4096;
-        const DamageStep = 8192;
-        const DamageCal = 16384;
-        const ChainEnd = 32768;
-        const Draw = 65536;
-        const Damage = 131072;
-        const Recover = 262144;
-        const Destroy = 524288;
-        const Remove = 1048576;
-        const Tohand = 2097152;
-        const Todeck = 4194304;
-        const Tograve = 8388608;
-        const BattlePhase = 16777216;
-        const Equip = 33554432;
+        const DrawPhase = 0x1;
+        const StandbyPhase = 0x2;
+        const MainEnd = 0x4;
+        const BattleStart = 0x8;
+        const BattleEnd = 0x10;
+        const EndPhase = 0x20;
+        const Summon = 0x40;
+        const SpecialSummon = 0x80;
+        const FlipSummon = 0x100;
+        const MonsterSet = 0x200;
+        const SpellTrapSet = 0x400;
+        const PositionChange = 0x800;
+        const Attack = 0x1000;
+        const DamageStep = 0x2000;
+        const DamageCalculate = 0x4000;
+        const ChainEnd = 0x8000;
+        const Draw = 0x10000;
+        const Damage = 0x20000;
+        const Recover = 0x40000;
+        const Destroy = 0x80000;
+        const Remove = 0x100000;
+        const ToHand = 0x200000;
+        const ToDeck = 0x400000;
+        const ToGrave = 0x800000;
+        const BattlePhase = 0x1000000;
+        const Equip = 0x2000000;
     }
 }
 
@@ -205,31 +319,31 @@ bitflags! {
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Type: u32 {
-        const Monster = 1;
-        const Spell = 2;
-        const Trap = 4;
-        const Normal = 16;
-        const Effect = 32;
-        const Fusion = 64;
-        const Ritual = 128;
-        const Trapmonster = 256;
-        const Spirit = 512;
-        const Union = 1024;
-        const Dual = 2048;
-        const Tuner = 4096;
-        const Synchro = 8192;
-        const Token = 16384;
-        const Quickplay = 65536;
-        const Continuous = 131072;
-        const Equip = 262144;
-        const Field = 524288;
-        const Counter = 1048576;
-        const Flip = 2097152;
-        const Toon = 4194304;
-        const Xyz = 8388608;
-        const Pendulum = 16777216;
-        const Spsummon = 33554432;
-        const Link = 67108864;
+        const Monster = 0x1;
+        const Spell = 0x2;
+        const Trap = 0x4;
+        const Normal = 0x10;
+        const Effect = 0x20;
+        const Fusion = 0x40;
+        const Ritual = 0x80;
+        const Trapmonster = 0x100;
+        const Spirit = 0x200;
+        const Union = 0x400;
+        const Dual = 0x800;
+        const Tuner = 0x1000;
+        const Synchro = 0x2000;
+        const Token = 0x4000;
+        const Quickplay = 0x10000;
+        const Continuous = 0x20000;
+        const Equip = 0x40000;
+        const Field = 0x80000;
+        const Counter = 0x100000;
+        const Flip = 0x200000;
+        const Toon = 0x400000;
+        const Xyz = 0x800000;
+        const Pendulum = 0x1000000;
+        const SpecialSummon = 0x2000000;
+        const Link = 0x4000000;
     }
 }
 
@@ -240,32 +354,32 @@ bitflags! {
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Race: u32 {
-        const Warrior = 1;
-        const Spellcaster = 2;
-        const Fairy = 4;
-        const Fiend = 8;
-        const Zombie = 16;
-        const Machine = 32;
-        const Aqua = 64;
-        const Pyro = 128;
-        const Rock = 256;
-        const Windbeast = 512;
-        const Plant = 1024;
-        const Insect = 2048;
-        const Thunder = 4096;
-        const Dragon = 8192;
-        const Beast = 16384;
-        const Beastwarrior = 32768;
-        const Dinosaur = 65536;
-        const Fish = 131072;
-        const Seaserpent = 262144;
-        const Reptile = 524288;
-        const Psycho = 1048576;
-        const Devine = 2097152;
-        const Creatorgod = 4194304;
-        const Wyrm = 8388608;
-        const Cyberse = 16777216;
-        const Illusion = 33554432;
+        const Warrior = 0x1;
+        const Spellcaster = 0x2;
+        const Fairy = 0x4;
+        const Fiend = 0x8;
+        const Zombie = 0x10;
+        const Machine = 0x20;
+        const Aqua = 0x40;
+        const Pyro = 0x80;
+        const Rock = 0x100;
+        const Windbeast = 0x200;
+        const Plant = 0x400;
+        const Insect = 0x800;
+        const Thunder = 0x1000;
+        const Dragon = 0x2000;
+        const Beast = 0x4000;
+        const Beastwarrior = 0x8000;
+        const Dinosaur = 0x10000;
+        const Fish = 0x20000;
+        const Seaserpent = 0x40000;
+        const Reptile = 0x80000;
+        const Psycho = 0x100000;
+        const Devine = 0x200000;
+        const Creatorgod = 0x400000;
+        const Wyrm = 0x800000;
+        const Cyberse = 0x1000000;
+        const Illusion = 0x2000000;
     }
 }
 
@@ -287,12 +401,12 @@ bitflags! {
         const Adjust = 0x100;
         const LostTarget = 0x200;
         const Rule = 0x400;
-        const Spsummon = 0x800;
-        const Dissummon = 0x1000;
+        const SpecialSummon = 0x800;
+        const DisableSummon = 0x1000;
         const Flip = 0x2000;
         const Discard = 0x4000;
-        const Rdamage = 0x8000;
-        const Rrecover = 0x10000;
+        const RecoverDamage = 0x8000;
+        const RecoverRecover = 0x10000;
         const Return = 0x20000;
         const Fusion = 0x40000;
         const Synchro = 0x80000;
@@ -318,11 +432,11 @@ bitflags! {
         const Disabled = 0x0001;
         const ToEnable = 0x0002;
         const ToDisable = 0x0004;
-        const ProcComplete = 0x0008;
+        const ProcessComplete = 0x0008;
         const SetTurn = 0x0010;
         const NoLevel = 0x0020;
         const BattleResult = 0x0040;
-        const SpsummonStep = 0x0080;
+        const SpecialSummonStep = 0x0080;
         const CannotChangeForm = 0x0100;
         const Summoning = 0x0200;
         const EffectEnabled = 0x0400;
@@ -343,9 +457,9 @@ bitflags! {
         const ContinuousPos = 0x2000000;
         const Forbidden = 0x4000000;
         const ActFromHand = 0x8000000;
-        const OppoBattle = 0x10000000;
+        const OpponentBattle = 0x10000000;
         const FlipSummonTurn = 0x20000000;
-        const SpsummonTurn = 0x40000000;
+        const SpecialSummonTurn = 0x40000000;
         const FlipSummonDisabled = 0x80000000;
     }
 }
@@ -388,13 +502,13 @@ bitflags! {
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Attribute: u32 {
-        const Earth = 1;
-        const Water = 2;
-        const Fire = 4;
-        const Wind = 8;
-        const Light = 16;
-        const Dark = 32;
-        const Devine = 64;
+        const Earth = 0x1;
+        const Water = 0x2;
+        const Fire = 0x4;
+        const Wind = 0x8;
+        const Light = 0x10;
+        const Dark = 0x20;
+        const Devine = 0x40;
     }
 }
 
@@ -405,21 +519,21 @@ bitflags! {
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Linkmarkers: u32 {
-        const BottomLeft = 1;
-        const Bottom = 2;
-        const BottomRight = 4;
-        const Left = 8;
-        const Right = 32;
-        const TopLeft = 64;
-        const Top = 128;
-        const TopRight = 256;
+        const BottomLeft = 0x1;
+        const Bottom = 0x2;
+        const BottomRight = 0x4;
+        const Left = 0x8;
+        const Right = 0x20;
+        const TopLeft = 0x40;
+        const Top = 0x80;
+        const TopRight = 0x100;
     }
 }
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
 #[brw(repr=u8)]
 #[repr(u8)]
-pub enum Duelstage {
+pub enum DuelStage {
     Begin = 0,
     Finger = 1,
     Firstgo = 2,
@@ -458,7 +572,7 @@ pub enum Hint {
     Event = 1,
     Message = 2,
     SelectMessage = 3,
-    Opselected = 4,
+    OpponentSelected = 4,
     Effect = 5,
     Race = 6,
     Attribute = 7,
@@ -472,16 +586,16 @@ pub enum Hint {
 #[brw(repr=u16)]
 #[repr(u16)]
 pub enum Phase {
-    Draw = 1,
-    Standby = 2,
-    Main1 = 4,
-    BattleStart = 8,
-    BattleStep = 16,
-    Damage = 32,
-    DamageCalculate = 64,
-    Battle = 128,
-    Main2 = 256,
-    End = 512,
+    Draw = 0x1,
+    Standby = 0x2,
+    Main1 = 0x4,
+    BattleStart = 0x8,
+    BattleStep = 0x10,
+    Damage = 0x20,
+    DamageCalculate = 0x40,
+    Battle = 0x80,
+    Main2 = 0x100,
+    End = 0x200,
 }
 
 
@@ -509,7 +623,7 @@ bitflags! {
 #[brw(repr=u8)]
 #[repr(u8)]
 pub enum Hand {
-    Scissor = 1,
+    Scissors = 1,
     Rock = 2,
     Paper = 3
 }
@@ -521,8 +635,10 @@ bitflags! {
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct OT: u32 {
-        const OCG = 0x1;
-        const TCG = 0x2;
+        const OCG = 1;
+        const TCG = 2;
+        const Custom = 4;
+        const SC = 8;
     }
 }
 
@@ -532,38 +648,38 @@ bitflags! {
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct Category: u32 {
-        const CATEGORY_1 = 0x1;
-        const CATEGORY_2 = 0x2;
-        const CATEGORY_3 = 0x4;
-        const CATEGORY_4 = 0x8;
-        const CATEGORY_5 = 0x10;
-        const CATEGORY_6 = 0x20;
-        const CATEGORY_7 = 0x40;
-        const CATEGORY_8 = 0x80;
-        const CATEGORY_9 = 0x100;
-        const CATEGORY_10 = 0x200;
-        const CATEGORY_11 = 0x400;
-        const CATEGORY_12 = 0x800;
-        const CATEGORY_13 = 0x1000;
-        const CATEGORY_14 = 0x2000;
-        const CATEGORY_15 = 0x4000;
-        const CATEGORY_16 = 0x8000;
-        const CATEGORY_17 = 0x10000;
-        const CATEGORY_18 = 0x20000;
-        const CATEGORY_19 = 0x40000;
-        const CATEGORY_20 = 0x80000;
-        const CATEGORY_21 = 0x100000;
-        const CATEGORY_22 = 0x200000;
-        const CATEGORY_23 = 0x400000;
-        const CATEGORY_24 = 0x800000;
-        const CATEGORY_25 = 0x1000000;
-        const CATEGORY_26 = 0x2000000;
-        const CATEGORY_27 = 0x4000000;
-        const CATEGORY_28 = 0x8000000;
-        const CATEGORY_29 = 0x10000000;
-        const CATEGORY_30 = 0x20000000;
-        const CATEGORY_31 = 0x40000000;
-        const CATEGORY_32 = 0x80000000;
+        const Destroy = 0x1;
+        const Release = 0x2;
+        const Remove = 0x4;
+        const ToHand = 0x8;
+        const ToDeck = 0x10;
+        const ToGrave = 0x20;
+        const DeckDestroy = 0x40;
+        const HandDestroy = 0x80;
+        const Summon = 0x100;
+        const SpecialSummon = 0x200;
+        const Token = 0x400;
+        const GraveAction = 0x800;
+        const Position = 0x1000;
+        const Control = 0x2000;
+        const Disable = 0x4000;
+        const DisableSummon = 0x8000;
+        const Draw = 0x10000;
+        const Search = 0x20000;
+        const Equip = 0x40000;
+        const Damage = 0x80000;
+        const Recover = 0x100000;
+        const AttackChange = 0x200000;
+        const DefenseChange = 0x400000;
+        const Counter = 0x800000;
+        const Coin = 0x1000000;
+        const Dice = 0x2000000;
+        const LeaveGrave = 0x4000000;
+        const GraveSpecialSummon = 0x8000000;
+        const Negate = 0x10000000;
+        const Announce = 0x20000000;
+        const FusionSummon = 0x40000000;
+        const ToExtra = 0x80000000;
     }
 }
 
@@ -646,4 +762,23 @@ pub enum OperationResult {
     Canceled = -1,
     Fail = 0,
     Success = 1,
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, FromPrimitive, IntoPrimitive, Debug)]
+#[br(map = |v: u8| WinReason::from(v))]
+#[bw(map = |v: &WinReason| u8::from(*v))]
+#[repr(u8)]
+pub enum WinReason {
+    LPZero = 1,
+    DeckOut = 2,
+    #[num_enum(catch_all)]
+    Other(u8)
+}
+
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[brw(repr = i8)]
+#[repr(i8)]
+pub enum SelectSumMode {
+    Exact = 0,
+    AtLeast = 1,
 }

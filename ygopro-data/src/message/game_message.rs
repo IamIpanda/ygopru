@@ -3,6 +3,7 @@
 
 use binrw::binrw;
 use binrw::helpers::until_eof;
+use num_enum::TryFromPrimitive;
 use ygopro_derive::Message;
 
 use crate::constants::*;
@@ -14,7 +15,7 @@ include!(concat!(env!("OUT_DIR"), "/game_message.rs"));
 every_game_message_flat_message!(crate::generate_enum);
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 1)]
 #[repr(C)] 
 pub struct Retry;
@@ -25,23 +26,23 @@ pub struct Retry;
 #[repr(C)]
 pub struct Hint {
     pub _type: crate::constants::Hint,
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub data: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 3)]
 #[repr(C)]
 pub struct Waiting;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 4)]
 #[repr(C)]
 pub struct Start {
     pub player_type: u8,
-    pub rule: i8,
+    pub rule: MasterRule,
     pub player1_lp: i32,
     pub player2_lp: i32,
     pub player1_deck_count: u16,
@@ -51,27 +52,27 @@ pub struct Start {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 5)]
 #[repr(C)]
 pub struct Win {
-    pub winner: LocalPlayer,
-    pub reason: u8
+    pub winner: CorePlayer,
+    pub reason: WinReason
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 6)]
 #[repr(C)]
 pub struct UpdateData {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub location: Location,
     #[br(parse_with=until_eof)]
     pub data: Vec<UpdateCardInfo>
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 7)]
 #[repr(C)]
 pub struct UpdateCard {
@@ -80,17 +81,17 @@ pub struct UpdateCard {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 8)]
 #[repr(C)]
 pub struct RequestDeck;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 10)]
 #[repr(C)]
 pub struct SelectBattleCommand {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     #[bw(calc(activatable_cards.len() as u8))]
     activatable_cards_size: u8,
     #[br(count = activatable_cards_size)]
@@ -108,11 +109,11 @@ pub struct SelectBattleCommand {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 11)]
 #[repr(C)]
 pub struct SelectIdleCommand {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     #[bw(calc(summonable_cards.len() as u8))]
     summonable_cards_size: u8,
     #[br(count = summonable_cards_size)]
@@ -121,10 +122,10 @@ pub struct SelectIdleCommand {
     special_summonable_cards_size: u8,
     #[br(count = special_summonable_cards_size)]
     pub special_summonable_cards: Vec<CardPosition<true, false, false>>,
-    #[bw(calc(reposable_cards.len() as u8))]
-    reposable_cards_size: u8,
-    #[br(count = reposable_cards_size)]
-    pub reposable_cards: Vec<CardPosition<true, false, false>>,
+    #[bw(calc(repositionable_cards.len() as u8))]
+    repositionable_cards_size: u8,
+    #[br(count = repositionable_cards_size)]
+    pub repositionable_cards: Vec<CardPosition<true, false, false>>,
     #[bw(calc(m_setable_cards.len() as u8))]
     m_setable_cards_size: u8,
     #[br(count = m_setable_cards_size)]
@@ -149,29 +150,29 @@ pub struct SelectIdleCommand {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 12)]
 #[repr(C)]
 pub struct SelectEffectYesNo {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     pub card_position: CardPosition<true, true, true>,
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 13)]
 #[repr(C)]
 pub struct SelectYesNo {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     pub description: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 14)]
 #[repr(C)]
 pub struct SelectOption {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     #[bw(calc(options.len() as u8))]
     options_size: u8,
     #[br(count = options_size)]
@@ -179,11 +180,11 @@ pub struct SelectOption {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 15)]
 #[repr(C)]
 pub struct SelectCard {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     #[br(map=|v:u8| v>0)]
     #[bw(map=|v| if *v {1u8} else {0u8})]
     pub select_cancelable: bool,
@@ -196,15 +197,17 @@ pub struct SelectCard {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 16)]
 #[repr(C)]
 pub struct SelectChain {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     #[bw(calc(activatable_cards.len() as u8))]
     pub activatable_cards_count: u8,
-    pub specount: u8,
-    pub forced: u8,
+    pub special_count: u8,
+    #[br(map = |v: u8| v != 0)]
+    #[bw(map = |v: &bool| *v as u8)]
+    pub forced: bool,
     pub hint0: i32,
     pub hint1: i32,
     #[br(count = activatable_cards_count)]
@@ -212,31 +215,31 @@ pub struct SelectChain {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 18)]
 #[repr(C)]
 pub struct SelectPlace {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     pub count: i8,
     pub selectable_field: i32,
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 19)]
 #[repr(C)]
 pub struct SelectPosition {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     pub code: u32,
     pub positions: Position
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 20)]
 #[repr(C)]
 pub struct SelectTribute {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     #[br(map=|v:u8| v>0)]
     #[bw(map=|v| if *v {1u8} else {0u8})]
     pub cancelable: bool,
@@ -249,17 +252,17 @@ pub struct SelectTribute {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 21)]
 #[repr(C)]
 pub struct SortChain;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 22)]
 #[repr(C)]
 pub struct SelectCounter {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     pub select_counter_type: i16,
     pub select_counter_count: i16,
     #[bw(calc(selectable_cards.len() as u8))]
@@ -269,12 +272,12 @@ pub struct SelectCounter {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 23)]
 #[repr(C)]
 pub struct SelectSum {
-    pub select_mode: i8,
-    pub selecting_player: LocalPlayer,
+    pub select_mode: SelectSumMode,
+    pub selecting_player: CorePlayer,
     pub select_sum_value: i32,
     pub select_min: i8,
     pub select_max: i8,
@@ -289,21 +292,21 @@ pub struct SelectSum {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 24)]
 #[repr(C)]
 pub struct SelectDisableField {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     pub count: i8,
     pub selectable_field: i32,
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 25)]
 #[repr(C)]
 pub struct SortCard {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(cards.len() as u8))]
     cards_size: u8,
     #[br(count = cards_size)]
@@ -311,11 +314,11 @@ pub struct SortCard {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 26)]
 #[repr(C)]
 pub struct SelectUnselectCard {
-    pub selecting_player: LocalPlayer,
+    pub selecting_player: CorePlayer,
     #[br(map=|v:u8| v>0)]
     #[bw(map=|v| if *v {1u8} else {0u8})]
     pub able: bool,
@@ -338,7 +341,7 @@ pub struct SelectUnselectCard {
 #[derive(Clone, Debug, Message)]
 #[message(gm, flag = 30)]
 pub struct ConfirmDecktop {
-    pub controller: LocalPlayer,
+    pub controller: CorePlayer,
     #[bw(calc(codes.len() as u8))]
     codes_size: u8,
     #[br(count = codes_size)]
@@ -346,11 +349,11 @@ pub struct ConfirmDecktop {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 31)]
 #[repr(C)]
 pub struct ConfirmCards {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(cards.len() as u8))]
     cards_size: u8,
     #[br(count = cards_size)]
@@ -358,42 +361,42 @@ pub struct ConfirmCards {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 32)]
 #[repr(C)]
 pub struct ShuffleDeck {
-    pub player: LocalPlayer 
+    pub player: CorePlayer 
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 33)]
 #[repr(C)]
 pub struct ShuffleHand {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub count: u8,
-    #[br(parse_with=until_eof)]
+    #[br(count = count)]
     pub codes: Vec<u32>
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 34)]
 #[repr(C)]
 pub struct RefreshDeck {
-    pub player: LocalPlayer
+    pub player: CorePlayer
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 35)]
 #[repr(C)]
 pub struct SwapGraveDeck {
-    pub player: LocalPlayer 
+    pub player: CorePlayer 
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 36)]
 #[repr(C)]
 pub struct ShuffleSetCard {
@@ -409,38 +412,38 @@ pub struct ShuffleSetCard {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 37)]
 #[repr(C)]
 pub struct ReverseDeck;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 38)]
 #[repr(C)]
 pub struct DeckTop;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 39)]
 #[repr(C)]
 pub struct ShuffleExtra {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub count: u8,
-    #[br(parse_with=until_eof)]
-    pub need_fix: Vec<u32>
+    #[br(count = count)]
+    pub codes: Vec<u32>
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 40)]
 #[repr(C)]
 pub struct NewTurn {
-    pub player: LocalPlayer 
+    pub player: CorePlayer 
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 41)]
 #[repr(C)]
 pub struct NewPhase {
@@ -448,11 +451,11 @@ pub struct NewPhase {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 42)]
 #[repr(C)]
 pub struct ConfirmExtraTop {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(selectable_cards.len() as u8))]
     selectable_cards_size: u8,
     #[br(count = selectable_cards_size)]
@@ -460,7 +463,7 @@ pub struct ConfirmExtraTop {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 50)]
 #[repr(C)]
 pub struct Move {
@@ -471,12 +474,12 @@ pub struct Move {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 53)]
 #[repr(C)]
 pub struct PositionChange {
     pub card: u32,
-    pub controller: LocalPlayer,
+    pub controller: CorePlayer,
     pub location: Location,
     pub sequence: i8,
     pub previous_position: Position,
@@ -484,7 +487,7 @@ pub struct PositionChange {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 54)]
 #[repr(C)]
 pub struct Set {
@@ -492,7 +495,7 @@ pub struct Set {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 55)]
 #[repr(C)]
 pub struct Swap {
@@ -501,7 +504,7 @@ pub struct Swap {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 56)]
 #[repr(C)]
 pub struct FieldDisabled {
@@ -509,7 +512,7 @@ pub struct FieldDisabled {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 60)]
 #[repr(C)]
 pub struct Summoning {
@@ -517,13 +520,13 @@ pub struct Summoning {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 61)]
 #[repr(C)]
 pub struct Summoned;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 62)]
 #[repr(C)]
 pub struct SpecialSummoning {
@@ -531,27 +534,27 @@ pub struct SpecialSummoning {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 63)]
 #[repr(C)]
-pub struct Spsummoned;
+pub struct SpecialSummoned;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 64)]
 #[repr(C)]
-pub struct Flipsummoning {
+pub struct FlipSummoning {
     pub position: (CardPosition<true, false, false>, Position), 
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 65)]
 #[repr(C)]
-pub struct Flipsummoned;
+pub struct FlipSummoned;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 70)]
 #[repr(C)]
 pub struct Chaining {
@@ -562,7 +565,7 @@ pub struct Chaining {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 71)]
 #[repr(C)]
 pub struct Chained {
@@ -570,7 +573,7 @@ pub struct Chained {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 72)]
 #[repr(C)]
 pub struct ChainSolving {
@@ -578,7 +581,7 @@ pub struct ChainSolving {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 73)]
 #[repr(C)]
 pub struct ChainSolved {
@@ -586,13 +589,13 @@ pub struct ChainSolved {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 74)]
 #[repr(C)]
 pub struct ChainEnd;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 75)]
 #[repr(C)]
 pub struct ChainNegated {
@@ -600,7 +603,7 @@ pub struct ChainNegated {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 76)]
 #[repr(C)]
 pub struct ChainDisabled {
@@ -608,17 +611,17 @@ pub struct ChainDisabled {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 80)]
 #[repr(C)]
 pub struct CardSelected;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 81)]
 #[repr(C)]
 pub struct RandomSelected {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(pcards.len() as u8))]
     pcards_size: u8,
     #[br(count = pcards_size)]
@@ -626,7 +629,7 @@ pub struct RandomSelected {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 83)]
 #[repr(C)]
 pub struct BecomeTarget {
@@ -637,11 +640,11 @@ pub struct BecomeTarget {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 90)]
 #[repr(C)]
 pub struct Draw {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(codes.len() as u8))]
     codes_size: u8,
     #[br(count = codes_size)]
@@ -649,25 +652,25 @@ pub struct Draw {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 91)]
 #[repr(C)]
 pub struct Damage {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub value: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 92)]
 #[repr(C)]
 pub struct Recover {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub value: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 93)]
 #[repr(C)]
 pub struct Equip {
@@ -676,16 +679,16 @@ pub struct Equip {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 94)]
 #[repr(C)]
-pub struct Lpupdate {
-    pub player: LocalPlayer,
+pub struct LPUpdate {
+    pub player: CorePlayer,
     pub lp: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 95)]
 #[repr(C)]
 pub struct Unequip {
@@ -693,7 +696,7 @@ pub struct Unequip {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 96)]
 #[repr(C)]
 pub struct CardTarget {
@@ -702,7 +705,7 @@ pub struct CardTarget {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 97)]
 #[repr(C)]
 pub struct CancelTarget {
@@ -711,16 +714,16 @@ pub struct CancelTarget {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 100)]
 #[repr(C)]
-pub struct PayLpcost {
-    pub player: LocalPlayer,
+pub struct PayLPCost {
+    pub player: CorePlayer,
     pub cost: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 101)]
 #[repr(C)]
 pub struct AddCounter {
@@ -730,7 +733,7 @@ pub struct AddCounter {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 102)]
 #[repr(C)]
 pub struct RemoveCounter {
@@ -740,7 +743,7 @@ pub struct RemoveCounter {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 110)]
 #[repr(C)]
 pub struct Attack {
@@ -749,40 +752,44 @@ pub struct Attack {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 111)]
 #[repr(C)]
 pub struct Battle {
     pub attacker: CardPosition<false, true, false>,
     pub attacker_attack: i32,
     pub attacker_defense: i32,
-    pub defenser_a: i8, // ???
+    #[br(map = |v: u8| v != 0)]
+    #[bw(map = |v: &bool| *v as u8)]
+    pub attacker_destroyed: bool,
     pub defenser: CardPosition<false, true, false>,
     pub defenser_attack: i32,
     pub defenser_defense: i32,
-    pub defenser_d: i8 // ???
+    #[br(map = |v: u8| v != 0)]
+    #[bw(map = |v: &bool| *v as u8)]
+    pub defender_destroyed: bool,
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 112)]
 #[repr(C)]
 pub struct AttackDisabled;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 113)]
 #[repr(C)]
 pub struct DamageStepStart;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 114)]
 #[repr(C)]
 pub struct DamageStepEnd;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 120)]
 #[repr(C)]
 pub struct MissedEffect {
@@ -791,29 +798,29 @@ pub struct MissedEffect {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 121)]
 #[repr(C)]
 pub struct BeChainTarget;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 122)]
 #[repr(C)]
 pub struct CreateRelation;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 123)]
 #[repr(C)]
 pub struct ReleaseRelation;
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 130)]
 #[repr(C)]
 pub struct TossCoin {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(result.len() as u8))]
     result_size: u8,
     #[br(count = result_size)]
@@ -821,11 +828,11 @@ pub struct TossCoin {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 131)]
 #[repr(C)]
 pub struct TossDice {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(result.len() as u8))]
     result_size: u8,
     #[br(count = result_size)]
@@ -833,47 +840,55 @@ pub struct TossDice {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 132)]
 #[repr(C)]
 pub struct RockPaperScissors {
-    pub player: LocalPlayer
+    pub player: CorePlayer
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 133)]
 #[repr(C)]
 pub struct HandResult {
-    pub result: i8
+    #[br(temp)]
+    #[bw(calc = u8::from(*hand0) | (u8::from(*hand1) << 2))]
+    _packed: u8,
+    #[br(calc = Hand::try_from_primitive(_packed & 0x03).unwrap())]
+    #[bw(ignore)]
+    pub hand0: Hand,
+    #[br(calc = Hand::try_from_primitive((_packed >> 2) & 0x03).unwrap())]
+    #[bw(ignore)]
+    pub hand1: Hand,
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 140)]
 #[repr(C)]
 pub struct AnnounceRace {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub announce_count: i8,
     pub available: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 141)]
 #[repr(C)]
 pub struct AnnounceAttribute {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub announce_count: i8,
     pub available: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 142)]
 #[repr(C)]
 pub struct AnnounceCard {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(value.len() as u8))]
     value_size: u8,
     #[br(count = value_size)]
@@ -881,11 +896,11 @@ pub struct AnnounceCard {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 143)]
 #[repr(C)]
 pub struct AnnounceNumber {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     #[bw(calc(value.len() as u8))]
     value_size: u8,
     #[br(count = value_size)]
@@ -893,34 +908,34 @@ pub struct AnnounceNumber {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 160)]
 #[repr(C)]
 pub struct CardHint {
     pub position: CardPosition<false, true, false>,
-    pub card_hint_type: i8,
+    pub card_hint_type: crate::constants::CardHint,
     pub value: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 161)]
 #[repr(C)]
 pub struct TagSwap {
-    pub player: LocalPlayer,
+    pub player: CorePlayer,
     pub mcount: u8,
     pub ecount: u8,
     pub pcount: u8,
     pub hcount: u8,
-    pub topcode: i32
+    pub top_code: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 162)]
 #[repr(C)]
 pub struct ReloadField {
-    pub duel_rule: u8,
+    pub duel_rule: MasterRule,
     pub player1_lp: i32,
     
     #[br(parse_with=until_eof)]
@@ -928,7 +943,7 @@ pub struct ReloadField {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 163)]
 #[repr(C)]
 pub struct AIName {
@@ -936,7 +951,7 @@ pub struct AIName {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 164)]
 #[repr(C)]
 pub struct ShowHint {
@@ -944,28 +959,46 @@ pub struct ShowHint {
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 165)]
 #[repr(C)]
 pub struct PlayerHint {
-    pub player: LocalPlayer,
-    pub player_hint_type: i8,
+    pub player: CorePlayer,
+    pub player_hint_type: crate::constants::PlayerHint,
     pub value: i32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 170)]
 #[repr(C)]
 pub struct MatchKill {
-    pub reason: i32
+    pub card_code: u32
 }
 
 #[binrw]
-#[derive(Debug, Message)]
+#[derive(Debug, Clone, Message)]
 #[message(gm, flag = 180)]
 #[repr(C)]
 pub struct CustomMsg {
     #[br(parse_with=until_eof)]
     pub data: Vec<u8>
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn print_sizes() {
+        macro_rules! print_size {
+            ($($msg:ident = $flag:literal),* $(,)?) => {
+                println!("=== GM ===");
+                $(
+                    println!("  {:30}: {:>4} bytes", stringify!($msg), std::mem::size_of::<super::$msg>());
+                )*
+                println!("  {:30}: {:>4} bytes", "MessageType", std::mem::size_of::<super::MessageType>());
+                println!("  {:30}: {:>4} bytes", "Message", std::mem::size_of::<super::Message>());
+            };
+        }
+        every_game_message_flat_message!(print_size);
+    }
 }

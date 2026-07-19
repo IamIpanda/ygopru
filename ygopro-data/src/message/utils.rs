@@ -107,7 +107,7 @@ macro_rules! generate_enum {
             }
         }
 
-        #[derive(binrw::BinRead, binrw::BinWrite, Debug)]
+        #[derive(binrw::BinRead, binrw::BinWrite, Clone, Debug)]
         pub enum Message {
             $(#[brw(magic($message_flag))]
             $message_name($message_name)),*

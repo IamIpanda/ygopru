@@ -53,6 +53,12 @@ pub mod string {
         }
     }
 
+    impl<const L: usize> PartialEq for FixedLengthString<L> {
+        fn eq(&self, other: &Self) -> bool {
+            &**self == &**other
+        }
+    }
+
     impl <const L: usize> std::fmt::Debug for FixedLengthString<L> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "FixedLengthString[{:}] ", L)?;
@@ -61,6 +67,13 @@ pub mod string {
     }
 
     impl<const L: usize> FixedLengthString<L> {
+        pub fn allocate() -> Self {
+            Self {
+                data: [0u16; L],
+                str: OnceLock::new(),
+            }
+        }
+
         pub fn new(str: String) -> Self {
             let this = Self {
                 data: cast_to_fix_length_array(&str),
@@ -106,6 +119,7 @@ pub mod string {
     }
 
     #[binrw]
+    #[derive(Clone)]
     pub struct U16String {
         #[br(parse_with=until_eof)]
         data: Vec<u16>,
@@ -196,8 +210,8 @@ pub mod complex {
     /// then parses into `Message` once and caches the result via `OnceLock`.
     /// When writing, always uses the original raw bytes — never re-serializes.
     pub struct Complex<Message> {
-        data: Bytes,
-        message: OnceLock<Message>,
+        pub data: Bytes,
+        pub message: OnceLock<Message>,
     }
 
     impl<Message: BinRead> Complex<Message> where for<'a> <Message as BinRead>::Args<'a>: Default {

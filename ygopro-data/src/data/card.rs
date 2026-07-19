@@ -1,4 +1,5 @@
 use std::ops::Deref;
+use std::ops::DerefMut;
 
 #[cfg(feature = "card")]
 use rusqlite::Connection;
@@ -23,8 +24,8 @@ pub struct CoreCard {
     pub race: Race,
     pub attack: i32,
     pub defense: i32,
-    pub lscale: u32,
-    pub rscale: u32,
+    pub left_scale: u32,
+    pub right_scale: u32,
     pub link_marker: Linkmarkers,
     pub rule_code: u32,
 }
@@ -73,6 +74,12 @@ impl Deref for Card {
     }
 }
 
+impl DerefMut for Card {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.card
+    }
+}
+
 #[cfg(feature = "card")]
 impl<'row, 'stmt> TryFrom<&'row Row<'stmt>> for CoreCard {
     type Error = rusqlite::Error;
@@ -97,8 +104,8 @@ impl<'row, 'stmt> TryFrom<&'row Row<'stmt>> for CoreCard {
             race: Race::from_bits_retain(row.get(8)?),
             attack: row.get(5)?,
             defense: row.get(6)?,
-            lscale: (level_raw >> 24) & 0xFF,
-            rscale: (level_raw >> 16) & 0xFF,
+            left_scale: (level_raw >> 24) & 0xFF,
+            right_scale: (level_raw >> 16) & 0xFF,
             link_marker: Linkmarkers::from_bits_retain((level_raw >> 8) & 0xFF),
             rule_code: 0,
         })
@@ -170,6 +177,7 @@ mod test {
     use crate::data::Card;
     use crate::data::CoreCard;
     use crate::constants::*;
+    use crate::data::card::SIZE_SETCODE;
 
     #[test]
     fn validate_core_card_raw_bytes() {
@@ -189,8 +197,8 @@ mod test {
             race: Race::Dragon,
             attack: 3000,
             defense: 2500,
-            lscale: 4,
-            rscale: 4,
+            left_scale: 4,
+            right_scale: 4,
             link_marker: Linkmarkers::Bottom | Linkmarkers::Top,
             rule_code: 0xDEADBEEF,
         };
@@ -214,8 +222,8 @@ mod test {
                     0x00, 0x20, 0x00, 0x00, // race
                     0xb8, 0x0b, 0x00, 0x00, // attack
                     0xc4, 0x09, 0x00, 0x00, // defense
-                    0x04, 0x00, 0x00, 0x00, // lscale
-                    0x04, 0x00, 0x00, 0x00, // rscale
+                    0x04, 0x00, 0x00, 0x00, // left_scale
+                    0x04, 0x00, 0x00, 0x00, // right_scale
                     0x82, 0x00, 0x00, 0x00, // link_marker
                     0xef, 0xbe, 0xad, 0xde, // rule_code
                 ][..]

@@ -50,6 +50,7 @@ bitflags! {
         const TagMode = 0x20;
         const SimpleAI = 0x40;
         const ReturnDeckTop = 0x80;
+        const RevealDeckSequence = 0x100;
     }
 }
 
@@ -221,7 +222,9 @@ fn replay_writer(body: &ReplayBody, header: &ReplayHeader) -> BinResult<()> {
         lzma_compress_with_options(&mut decompressed_data, &mut compressed_data, &lzma_rs::compress::Options { 
             unpacked_size: lzma_rs::compress::UnpackedSize::SkipWritingToHeader
         })?;
-        compressed_data.into_inner()
+        let mut data = compressed_data.into_inner();
+        data.drain(..5); // replay_parser prepends header.props[0..5]; strip encoder's lzma header
+        data
     } else { decompressed_data.into_inner() };
     compressed_data.write_options(writer, endian, ())
 }
@@ -239,5 +242,24 @@ mod test {
        let mut reader = Cursor::new(arr);
        let replay = Replay::read_le(&mut reader);
        println!("{:?}", replay);
+    }
+
+    #[test]
+    fn test_replay_roundtrip() {
+        use binrw::BinWrite;
+
+        let raw = std::fs::read("/Users/iami/Downloads/极羽光_vs_爱尔琳妮_20260531225205_G1.yrp").unwrap();
+        let replay = Replay::read_le(&mut Cursor::new(&raw)).unwrap();
+
+        let mut buf = Cursor::new(Vec::new());
+        replay.write_le(&mut buf).unwrap();
+        let written = buf.into_inner();
+
+        let decoded = Replay::read_le(&mut Cursor::new(written)).unwrap();
+        assert_eq!(decoded.header.id, replay.header.id);
+        assert_eq!(decoded.body.host_name.to_string(), replay.body.host_name.to_string());
+        assert_eq!(decoded.body.start_lp, replay.body.start_lp);
+        assert_eq!(decoded.body.host_deck.main, replay.body.host_deck.main);
+        assert_eq!(decoded.body.datas.len(), replay.body.datas.len());
     }
 }

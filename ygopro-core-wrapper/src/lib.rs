@@ -9,7 +9,13 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 use std::os::raw::c_int;
 
-pub use ygopro_data::data::CoreCard;
+use ygopro_data::constants::CorePlayer;
+use ygopro_data::constants::Location;
+use ygopro_data::constants::MasterRule;
+use ygopro_data::constants::Position;
+use ygopro_data::constants::Query;
+use ygopro_data::data::CoreCard;
+use ygopro_data::data::DuelOptions;
 
 pub type intptr_t = isize;
 
@@ -41,24 +47,89 @@ unsafe extern "C" {
     pub fn set_responsei(pduel: intptr_t, value: i32);
     pub fn set_responseb(pduel: intptr_t, buf: *mut u8);
     pub fn preload_script(pduel: intptr_t, script_name: *const c_char) -> i32;
-
-    pub fn shuffle_deck(seeds: *const u32, deck: *mut u32, count: usize);
 }
 
-// ==================================================
-// Safe wrappers
-// ==================================================
-
-pub fn create_duel_safe(seeds: &[u32; SEED_COUNT]) -> intptr_t {
-    unsafe { create_duel_v2(seeds.as_ptr()) }
+pub struct Duel {
+    pduel: intptr_t
 }
 
-pub fn start_duel_with_rule(pduel: intptr_t, duel_options: u16, duel_rule: u8) {
-    let options = ((duel_rule as u32) << 16) | (duel_options as u32);
-    unsafe { start_duel(pduel, options) }
+pub enum DuelSeed {
+    None,
+    Single(u32),
+    Complicated([u32; SEED_COUNT]),
 }
 
-pub fn preload_script_from_path(pduel: intptr_t, path: &str) -> i32 {
-    let cpath = CString::new(path).unwrap();
-    unsafe { preload_script(pduel, cpath.as_ptr()) }
+impl Duel {
+    pub fn new(seed: DuelSeed) -> Self {
+        match seed {
+            DuelSeed::None => {
+                let seed = rand::random::<u64>();
+                Self { pduel: unsafe { create_duel(seed as u32) } }
+            },
+            DuelSeed::Single(s) => Self { pduel: unsafe { create_duel(s) } },
+            DuelSeed::Complicated(seq) => Self { pduel: unsafe { create_duel_v2(seq.as_ptr()) } },
+        }
+    }
+
+    pub fn start(&self, options: DuelOptions, rule: MasterRule) {
+        let opt = ((rule as u32) << 16) | (options.bits() as u32);
+        unsafe { start_duel(self.pduel, opt) };
+    }
+
+    pub fn end(&self) {
+        unsafe { end_duel(self.pduel) };
+    }
+
+    pub fn set_player_info(&self, playerid: CorePlayer, lp: i32, startcount: i32, drawcount: i32) {
+        unsafe { set_player_info(self.pduel, playerid as i32, lp, startcount, drawcount) };
+    }
+
+    pub fn get_log_message(&self, buf: &mut [u8]) {
+        unsafe { get_log_message(self.pduel, buf.as_mut_ptr()) };
+    }
+
+    pub fn get_message(&self, buf: &mut [u8]) -> i32 {
+        unsafe { get_message(self.pduel, buf.as_mut_ptr()) }
+    }
+
+    pub fn process(&self) -> u32 {
+        unsafe { process(self.pduel) }
+    }
+
+    pub fn new_card(&self, code: u32, owner: CorePlayer, playerid: CorePlayer, location: Location, sequence: u8, position: Position) {
+        unsafe { new_card(self.pduel, code, owner as u8, playerid as u8, location.bits(), sequence, position as u8) };
+    }
+
+    pub fn new_tag_card(&self, code: u32, owner: CorePlayer, location: Location) {
+        unsafe { new_tag_card(self.pduel, code, owner as u8, location.bits()) };
+    }
+
+    pub fn query_card(&self, player: CorePlayer, location: Location, sequence: u8, query_flag: Query, buf: &mut [u8], use_cache: bool) -> i32 {
+        unsafe { query_card(self.pduel, player as u8, location.bits(), sequence, query_flag.bits(), buf.as_mut_ptr(), use_cache as i32) }
+    }
+
+    pub fn query_field_count(&self, player: CorePlayer, location: Location) -> i32 {
+        unsafe { query_field_count(self.pduel, player as u8, location.bits()) }
+    }
+
+    pub fn query_field_card(&self, player: CorePlayer, location: Location, query_flag: Query, buf: &mut [u8], use_cache: bool) -> i32 {
+        unsafe { query_field_card(self.pduel, player as u8, location.bits(), query_flag.bits(), buf.as_mut_ptr(), use_cache as i32) }
+    }
+
+    pub fn query_field_info(&self, buf: &mut [u8]) -> i32 {
+        unsafe { query_field_info(self.pduel, buf.as_mut_ptr()) }
+    }
+
+    pub fn set_responsei(&self, value: i32) {
+        unsafe { set_responsei(self.pduel, value) };
+    }
+
+    pub fn set_responseb(&self, buf: &[u8]) {
+        unsafe { set_responseb(self.pduel, buf.as_ptr() as *mut u8) };
+    }
+
+    pub fn preload_script(&self, script_name: &str) -> i32 {
+        let cpath = CString::new(script_name).unwrap();
+        unsafe { preload_script(self.pduel, cpath.as_ptr()) }
+    }
 }

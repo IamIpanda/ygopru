@@ -14,7 +14,7 @@ use crate::constants::*;
 pub struct CardPosition<const CODE: bool, const SUB_SEQUENCE: bool, const DESCRIPTION: bool> {
     #[brw(if(CODE))]
     pub code: u32,
-    pub controller: LocalPlayer,
+    pub controller: CorePlayer,
     pub location: Location,
     pub sequence: i8,
     #[brw(if(SUB_SEQUENCE))]
@@ -44,7 +44,7 @@ pub enum QueryData {
     TargetCard(CardPosition<false, true, false>),
     OverlayCard(Vec<i32>), // todo: fix
     Counters(Vec<(i16, i16)>), // todo: fix,
-    Owner(LocalPlayer),
+    Owner(CorePlayer),
     Status(Status),
     LeftScale(i32),
     RightScale(i32),
@@ -88,7 +88,7 @@ impl BinRead for QueryDatas {
             query_datas.push(QueryData::Counters(Vec::<(i16, i16)>::read_options(reader, endian, VecArgs { count, inner: () })?)); 
         }
         if query.contains(Query::Owner) { 
-            query_datas.push(QueryData::Owner(LocalPlayer::read_options(reader, endian, ())?)); 
+            query_datas.push(QueryData::Owner(CorePlayer::read_options(reader, endian, ())?)); 
             reader.read_le::<[u8; 3]>()?; // padding 3 bytes
         }
         if query.contains(Query::Status)     { query_datas.push(QueryData::Status(Status::read_options(reader,  endian, ())?)); }
@@ -132,7 +132,6 @@ impl<'a> From<&'a QueryData> for Query {
 
 #[derive(Clone, Debug)]
 pub enum UpdateCardInfo {
-    Fail,
     Empty,
     Data(Vec<QueryData>)
 }
@@ -142,14 +141,11 @@ impl BinRead for UpdateCardInfo {
 
     fn read_options<R: Read + Seek>(reader: &mut R, endian: binrw::Endian, _: Self::Args<'_>) -> binrw::prelude::BinResult<Self> {
         let len = u32::read_options(reader, endian, ())?;
-        if len == 4 { return Ok(UpdateCardInfo::Fail); }
-        else if len == 8 { return Ok(UpdateCardInfo::Empty); }
-        else {
-            let pos = reader.stream_position()?;
-            let datas = QueryDatas::read_options(reader, endian, ())?;
-            reader.seek(std::io::SeekFrom::Start(pos + len as u64 - 4))?;
-            return Ok(UpdateCardInfo::Data(datas.0));
-        }
+        if len == 4 { return Ok(UpdateCardInfo::Empty); }
+        let pos = reader.stream_position()?;
+        let datas = QueryDatas::read_options(reader, endian, ())?;
+        reader.seek(std::io::SeekFrom::Start(pos + len as u64 - 4))?;
+        Ok(UpdateCardInfo::Data(datas.0))
     }
 }
 
@@ -159,8 +155,7 @@ impl BinWrite for UpdateCardInfo {
     fn write_options<W: Write + Seek>(&self, writer: &mut W, endian: binrw::Endian, _: Self::Args<'_>) -> binrw::prelude::BinResult<()> {
         let args = ();
         let queries = match self {
-            UpdateCardInfo::Empty => return u8::write_options(&4, writer, endian, args),
-            UpdateCardInfo::Fail => return u8::write_options(&8, writer, endian, args),
+            UpdateCardInfo::Empty => return u32::write_options(&4, writer, endian, args),
             UpdateCardInfo::Data(data) => data
         };
         let flag: u32 = queries.iter().map(|query| Query::from(query).bits()).sum();

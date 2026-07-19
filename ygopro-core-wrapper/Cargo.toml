@@ -6,6 +6,7 @@ links = "ygopro-core"
 
 [dependencies]
 ygopro-data = { path = "../ygopro-data" }
+rand = "0.8"
 
 [build-dependencies]
 cc = "1"
