@@ -3,6 +3,7 @@ use quote::quote;
 use syn::ItemFn;
 use syn::NestedMeta;
 use syn::Path;
+use syn::Ident;
 
 pub struct ParsedArgs {
     #[allow(dead_code)]
@@ -60,6 +61,55 @@ pub fn parse_args(attr: &[NestedMeta]) -> Result<ParsedArgs, syn::Error> {
     Ok(ParsedArgs { key, priority })
 }
 
-pub fn shared_impl(_args: ParsedArgs, function: ItemFn) -> TokenStream2 {
-    quote! { #function }
+pub fn shared_impl(args: ParsedArgs, function: ItemFn) -> TokenStream2 {
+    let function_ident = &function.sig.ident;
+    let function_name = function_ident.to_string();
+
+    let builder_ident = Ident::new(
+        &format!("build_handle_{function_name}"),
+        function_ident.span(),
+    );
+
+    let priority = args.priority
+        .map(|lit| quote! { #lit })
+        .unwrap_or_else(|| quote! { 128 });
+
+    let key = args.key;
+
+    quote! { 
+        #function 
+
+        fn #builder_ident() -> (HandlerKey, Handler) {
+            (
+                ::std::convert::Into::<HandlerKey>::into(<#key as ::ygopro_data::message::Message>::message_type()),
+                Handler::new(#priority, #function_name, module_path!(), #function_ident),
+            )
+        }
+    }
+}
+
+pub fn register_to_impl(slice_idents: Vec<Ident>, function: ItemFn) -> TokenStream2 {
+    let function_ident = &function.sig.ident;
+    let function_name = function_ident.to_string();
+
+    let builder_ident = Ident::new(
+        &format!("build_handle_{function_name}"),
+        function_ident.span(),
+    );
+
+    let register_statics: Vec<_> = slice_idents.iter().enumerate().map(|(index, slice_ident)| {
+        let register_ident = Ident::new(
+            &format!("REGISTER_{}_{}", function_ident.to_string().to_uppercase(), index),
+            function_ident.span(),
+        );
+        quote! {
+            #[linkme::distributed_slice(#slice_ident)]
+            static #register_ident: fn() -> (HandlerKey, Handler) = #builder_ident;
+        }
+    }).collect();
+
+    quote! {
+        #function
+        #(#register_statics)*
+    }
 }

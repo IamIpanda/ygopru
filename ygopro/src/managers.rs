@@ -20,6 +20,10 @@ pub mod data_manager {
         GLOBAL_DATA_MANAGER.store(Some(Arc::new(data_manager)));
     }
 
+    pub fn load() -> arc_swap::Guard<Option<Arc<DataManager>>> {
+        GLOBAL_DATA_MANAGER.load()
+    }
+
     const CARD_ARTWORK_VERSIONS_OFFSET: u32 = 20;
 
     fn is_alternative(code: u32, alias: u32) -> bool {
@@ -79,9 +83,7 @@ pub mod data_manager {
             }
 
             for (code, list) in &self.extra_setcode {
-                if list.is_empty() || list.len() > 16 {
-                    continue;
-                }
+                if list.is_empty() || list.len() > 16 { continue; }
                 if let Some(card) = self.cards.get_mut(code) {
                     for (i, &sc) in list.iter().enumerate() {
                         card.setcode[i] = sc;
@@ -189,6 +191,10 @@ pub mod deck_manager {
 
     pub fn set_global(deck_manager: DeckManager) {
         GLOBAL_DECK_MANAGER.store(Some(Arc::new(deck_manager)));
+    }
+
+    pub fn load() -> arc_swap::Guard<Option<Arc<DeckManager>>> {
+        GLOBAL_DECK_MANAGER.load()
     }
 
     pub struct DeckManager {

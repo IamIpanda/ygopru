@@ -8,12 +8,17 @@ use binrw::BinWrite;
 use binrw::VecArgs;
 
 use crate::constants::*;
+use crate::message::game_message::CardCode;
+use crate::message::game_message::Mask;
+use ygopro_derive::Mask;
 
 
-#[derive(BinRead, BinWrite, Clone, Debug)]
+#[derive(BinRead, BinWrite, Clone, Debug, Mask)]
 pub struct CardPosition<const CODE: bool, const SUB_SEQUENCE: bool, const DESCRIPTION: bool> {
     #[brw(if(CODE))]
-    pub code: u32,
+    #[mask]
+    #[mask_if(self.controller != player)]
+    pub code: CardCode,
     pub controller: CorePlayer,
     pub location: Location,
     pub sequence: i8,

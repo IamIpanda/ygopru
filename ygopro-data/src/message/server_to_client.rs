@@ -6,7 +6,6 @@ use binrw::BinWrite;
 use ygopro_derive::Message;
 
 use crate::generate_enum;
-use crate::constants::CorePlayer;
 use crate::constants::Netplayer;
 use crate::constants::PlayerChange;
 use crate::message::game_message;
@@ -29,9 +28,13 @@ pub struct GameMessage {
 #[message(stoc, flag = 2)]
 #[repr(C)]
 pub struct ErrorMessage {
-    #[brw(pad_after = 3)]
-    pub msg: u8,
-    pub code: u32
+    pub err: crate::constants::ErrorMessage
+}
+
+impl From<crate::constants::ErrorMessage> for ErrorMessage {
+    fn from(value: crate::constants::ErrorMessage) -> Self {
+        Self { err: value }
+    }
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
@@ -48,8 +51,26 @@ pub struct SelectTp;
 #[message(stoc, flag = 5)]
 #[repr(C)]
 pub struct HandResult {
-    pub res1: crate::constants::Hand,
-    pub res2: crate::constants::Hand
+    pub hand1: crate::constants::Hand,
+    pub hand2: crate::constants::Hand
+}
+
+impl HandResult {
+    pub fn swap(&mut self) {
+        let r = self.hand1;
+        self.hand1 = self.hand2;
+        self.hand2 = r;
+    }
+
+    pub fn swap_clone(&self) -> Self {
+        let mut cloned = self.clone();
+        cloned.swap();
+        cloned
+    } 
+
+    pub fn judge(&self) -> crate::constants::HandResult {
+        self.hand1.judge(&self.hand2)
+    }
 }
 
 /// reserved, never sent by server
@@ -100,7 +121,7 @@ pub struct JoinGame {
 #[message(stoc, flag = 19)]
 #[repr(C)]
 pub struct TypeChange {
-    pub _type: crate::constants::TypeChange
+    pub change: crate::constants::TypeChange,
 }
  
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
@@ -142,9 +163,7 @@ pub struct TimeLimit {
 #[message(stoc, flag = 25)]
 #[repr(C)]
 pub struct Chat {
-    #[br(map=|v: u16| CorePlayer::try_from(v as u8).unwrap_or(CorePlayer::None))]
-    #[bw(map=|v: &CorePlayer| *v as u16)]
-    pub player: CorePlayer,
+    pub player: Netplayer,
     pub msg: U16String
 }
 
@@ -175,6 +194,12 @@ pub struct HsWatchChange {
 #[message(stoc, flag = 48)]
 #[repr(C)]
 pub struct FieldFinish;
+
+// extended by rust ygopro
+#[derive(BinRead, BinWrite, Debug, Clone, Message)]
+#[message(stoc, flag = 251)]
+#[repr(C)]
+pub struct Kick;
 
 #[cfg(test)]
 mod test {

@@ -6,6 +6,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::LengthDelimitedCodec;
 
 use ygopro_data::constants::Mode;
+use ygopro_data::constants::OT;
 use ygopro_data::constants::MasterRule;
 use ygopro_data::data::ReplayMode;
 use ygopro_data::message::HostInfo;
@@ -30,7 +31,14 @@ fn parse_args() -> (u16, HostInfo, ReplayMode) {
 
     let hostinfo = HostInfo {
         lflist: args[2].parse().unwrap_or(0),
-        rule: args[3].parse().unwrap_or(0),
+        rule: match args[3].parse::<u8>().unwrap_or(0) {
+            0 => OT::OCG,
+            1 => OT::TCG,
+            2 => OT::SC,
+            3 => OT::Custom,
+            4 => OT::OCG | OT::TCG,
+            _ => OT::empty(),
+        },
         mode: match args[4].parse::<u8>().unwrap_or(0) {
             m if m > 2 => Mode::Single,
             m => Mode::try_from(m).unwrap_or(Mode::Single),

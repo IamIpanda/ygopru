@@ -14,6 +14,7 @@ use ygopro_data::message::stoc;
 
 use crate::handler::Bundle;
 use crate::handler::Call;
+use crate::extract::Request;
 
 pub fn resolve_globals<K, H: Clone>(handlers: &mut HashMap<K, Vec<H>>, global_handlers: &[H], key: impl Fn(&H) -> u8) {
     for list in handlers.values_mut() {
@@ -70,6 +71,15 @@ every_client_to_server_flat_message!(impl_ctos_message_key);
 every_server_to_client_flat_message!(impl_stoc_message_key);
 every_game_message_flat_message!(impl_gm_message_key);
 
+impl<Message, Extra> MessageKey<u8> for Request<Message, Extra>
+where
+    Message: MessageKey<u8>,
+{
+    fn message_key(&self) -> u8 {
+        self.message.message_key()
+    }
+}
+
 pub struct Processor<Key, Req, State = crate::handler::State, Res = (), H: Call<Req, State, Res> = crate::handler::tower_handler::TowerHandler<Req, State, Res>> {
     handlers: HashMap<Key, Vec<H>>,
     global_handlers: Vec<H>,
@@ -101,27 +111,44 @@ where
         resolve_globals(&mut self.handlers, &self.global_handlers, |h| h.priority());
     }
 
-    pub fn process<'a, Item, InnerStream, AssembleBundle>(&'a self, stream: InnerStream, assemble_bundle: AssembleBundle) -> impl Stream<Item = Res> + 'a
+    pub async fn process_bundle(&self, bundle: Bundle<Req, State, Res>, key: Key) -> Bundle<Req, State, Res>
     where
-        Key: Clone + Send + 'static,
+        Key: Eq + Hash,
+    {
+        let handlers = self.handlers.get(&key).unwrap_or(&self.global_handlers);
+        let mut bundle = bundle;
+        for handler in handlers {
+            bundle = handler.call(bundle).await;
+        }
+        bundle
+    }
+
+    pub fn process<Item, InnerStream, AssembleBundle, ConsumeBundle>(
+        self: std::sync::Arc<Self>,
+        stream: InnerStream,
+        assemble_bundle: AssembleBundle,
+        consume_bundle: ConsumeBundle,
+    ) -> impl Stream<Item = Bundle<Req, State, Res>>
+    where
+        Key: Clone + Eq + Hash + Send + 'static,
         Req: Send + 'static,
         Res: Send + 'static,
+        State: Send + 'static,
         Item: MessageKey<Key> + Into<Req> + Send + 'static,
         InnerStream: Stream<Item = Item> + Send + 'static,
-        AssembleBundle: Fn(Req) -> Bundle<Req, State, Res> + 'a,
+        AssembleBundle: Fn(Req) -> Bundle<Req, State, Res> + Send + 'static,
+        ConsumeBundle: Fn(Bundle<Req, State, Res>) -> Bundle<Req, State, Res> + Clone + Send + 'static,
     {
         stream.then(move |item| {
             let key = item.message_key();
             let request: Req = item.into();
             let bundle = assemble_bundle(request);
-
-            let handlers = self.handlers.get(&key).unwrap_or(&self.global_handlers);
+            let processor = self.clone();
+            let consume_bundle = consume_bundle.clone();
             async move {
-                let mut bundle = bundle;
-                for handler in handlers {
-                    bundle = handler.call(bundle).await;
-                }
-                bundle.response
+                let bundle = processor.process_bundle(bundle, key).await;
+                let bundle = consume_bundle(bundle);
+                bundle
             }
         })
     }

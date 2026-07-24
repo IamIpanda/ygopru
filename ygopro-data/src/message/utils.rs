@@ -3,6 +3,7 @@ use binrw::BinRead;
 use binrw::BinWrite;
 
 use crate::constants::MasterRule;
+use crate::constants::OT;
 
 pub trait PureMessage: 'static {}
 
@@ -14,7 +15,7 @@ pub trait Message: PureMessage + Debug {
 #[repr(C)]
 pub struct HostInfo {
     pub lflist: i32,
-    pub rule: u8,
+    pub rule: OT,
     pub mode: crate::constants::Mode,
     pub duel_rule: crate::constants::MasterRule,
     #[br(map=|v:u8| v>0)]
@@ -34,7 +35,7 @@ impl Default for HostInfo {
     fn default() -> Self {
         Self { 
             lflist: 0, 
-            rule: 0, 
+            rule: OT::empty(),
             mode: crate::constants::Mode::Match, 
             duel_rule: MasterRule::MasterRule2020,
             no_check_deck: false, 
@@ -114,6 +115,14 @@ macro_rules! generate_enum {
         }
 
         impl crate::message::PureMessage for Message {}
+
+        impl From<&Message> for MessageType {
+            fn from(value: &Message) -> Self {
+                match value {
+                    $(Message::$message_name(_) => MessageType::$message_name),*
+                }
+            }
+        }
 
         $(
             impl TryFrom<Message> for $message_name {

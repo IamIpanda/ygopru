@@ -14,6 +14,7 @@ thiserror = "1"
 rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 ygopro-derive = { path = "../ygopro-derive" }
 bytes = "1.11.1"
+modular-bitfield = "0.13.1"
 
 [build-dependencies]
 syn = "1.0"

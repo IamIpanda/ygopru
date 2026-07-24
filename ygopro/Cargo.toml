@@ -24,8 +24,9 @@ env_logger = "0.11"
 arc-swap = "1"
 hashbrown = "0"
 rand = "0.8"
+linkme = "0.3"
 
 ygopro-data = { path = "../ygopro-data" }
 ygopro-core-wrapper = { path = "../ygopro-core-wrapper" }
 ygopro-handler = { path = "../ygopro-handler" }
-linkme = "0.3.36"
+ygopro-derive = { path = "../ygopro-derive" }

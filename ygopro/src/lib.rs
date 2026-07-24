@@ -25,3 +25,15 @@ pub fn init() {
     let strings = ygopro_data::data::load_strings_conf("strings.conf");
     managers::i18n::set_strings(strings);
 }
+
+pub fn init_core() {
+    unsafe {
+        ygopro_core_wrapper::set_script_reader(Some(data_manager::script_reader));
+        ygopro_core_wrapper::set_card_reader(Some(data_manager::card_reader));
+        ygopro_core_wrapper::set_message_handler(Some(core_message_handler));
+    }
+}
+
+extern "C" fn core_message_handler(pduel: isize, message_type: u32) -> u32 {
+    0
+}

@@ -1,9 +1,15 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 
+use binrw::BinRead;
+use binrw::BinWrite;
 use binrw::binrw;
 use binrw::helpers::until_eof;
+use modular_bitfield::bitfield;
+use modular_bitfield::specifiers::B3;
+use modular_bitfield::specifiers::B28;
 use num_enum::TryFromPrimitive;
+use ygopro_derive::Mask;
 use ygopro_derive::Message;
 
 use crate::constants::*;
@@ -14,13 +20,57 @@ use crate::utils::string::U16String;
 include!(concat!(env!("OUT_DIR"), "/game_message.rs"));
 every_game_message_flat_message!(crate::generate_enum);
 
+pub trait Mask {
+    fn mask(&mut self);
+    fn mask_towards(&mut self, _player: CorePlayer) {
+        self.mask();
+    }
+}
+
+impl<T: Mask> Mask for Vec<T> {
+    fn mask(&mut self) {
+        for item in self { item.mask(); }
+    }
+    fn mask_towards(&mut self, player: CorePlayer) {
+        for item in self { item.mask_towards(player); }
+    }
+}
+
+pub trait MaskedClone: Mask + Clone {
+    fn clone_masked(&self) -> Self {
+        let mut mirror = self.clone();
+        mirror.mask();
+        mirror
+    }
+}
+
+impl<T> MaskedClone for T where T: Mask + Clone {}
+
+macro_rules! impl_mask_for_message {
+    ($($message_name:ident=$message_flag:literal),*) => {
+        impl Mask for Message {
+            fn mask(&mut self) {
+                match self {
+                    $(Message::$message_name(inner) => inner.mask()),*
+                }
+            }
+            fn mask_towards(&mut self, player: CorePlayer) {
+                match self {
+                    $(Message::$message_name(inner) => inner.mask_towards(player)),*
+                }
+            }
+        }
+    };
+}
+every_game_message_flat_message!(impl_mask_for_message);
+
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 1)]
 #[repr(C)] 
 pub struct Retry;
 
-#[derive(Debug, Message, Clone)]
+#[derive(Debug, Message, Clone, Mask)]
 #[message(gm, flag = 2)]
 #[binrw]
 #[repr(C)]
@@ -31,13 +81,13 @@ pub struct Hint {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 3)]
 #[repr(C)]
 pub struct Waiting;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 4)]
 #[repr(C)]
 pub struct Start {
@@ -52,7 +102,7 @@ pub struct Start {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 5)]
 #[repr(C)]
 pub struct Win {
@@ -61,7 +111,7 @@ pub struct Win {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 6)]
 #[repr(C)]
 pub struct UpdateData {
@@ -72,7 +122,7 @@ pub struct UpdateData {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 7)]
 #[repr(C)]
 pub struct UpdateCard {
@@ -81,13 +131,13 @@ pub struct UpdateCard {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 8)]
 #[repr(C)]
 pub struct RequestDeck;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 10)]
 #[repr(C)]
 pub struct SelectBattleCommand {
@@ -109,7 +159,7 @@ pub struct SelectBattleCommand {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 11)]
 #[repr(C)]
 pub struct SelectIdleCommand {
@@ -150,7 +200,7 @@ pub struct SelectIdleCommand {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 12)]
 #[repr(C)]
 pub struct SelectEffectYesNo {
@@ -159,7 +209,7 @@ pub struct SelectEffectYesNo {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 13)]
 #[repr(C)]
 pub struct SelectYesNo {
@@ -168,7 +218,7 @@ pub struct SelectYesNo {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 14)]
 #[repr(C)]
 pub struct SelectOption {
@@ -180,7 +230,7 @@ pub struct SelectOption {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 15)]
 #[repr(C)]
 pub struct SelectCard {
@@ -193,11 +243,12 @@ pub struct SelectCard {
     #[bw(calc(positions.len() as u8))]
     positions_size: u8,
     #[br(count = positions_size)]
+    #[mask]
     pub positions: Vec<CardPosition<true, true, false>>
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 16)]
 #[repr(C)]
 pub struct SelectChain {
@@ -215,7 +266,7 @@ pub struct SelectChain {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 18)]
 #[repr(C)]
 pub struct SelectPlace {
@@ -225,7 +276,7 @@ pub struct SelectPlace {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 19)]
 #[repr(C)]
 pub struct SelectPosition {
@@ -235,7 +286,7 @@ pub struct SelectPosition {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 20)]
 #[repr(C)]
 pub struct SelectTribute {
@@ -252,13 +303,13 @@ pub struct SelectTribute {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 21)]
 #[repr(C)]
 pub struct SortChain;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 22)]
 #[repr(C)]
 pub struct SelectCounter {
@@ -272,7 +323,7 @@ pub struct SelectCounter {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 23)]
 #[repr(C)]
 pub struct SelectSum {
@@ -292,7 +343,7 @@ pub struct SelectSum {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 24)]
 #[repr(C)]
 pub struct SelectDisableField {
@@ -302,7 +353,7 @@ pub struct SelectDisableField {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 25)]
 #[repr(C)]
 pub struct SortCard {
@@ -314,7 +365,7 @@ pub struct SortCard {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 26)]
 #[repr(C)]
 pub struct SelectUnselectCard {
@@ -330,15 +381,17 @@ pub struct SelectUnselectCard {
     #[bw(calc(positions1.len() as u8))]
     positions1_size: u8,
     #[br(count = positions1_size)]
+    #[mask]
     pub positions1: Vec<CardPosition<true, true, false>>,
     #[bw(calc(positions2.len() as u8))]
     positions2_size: u8,
     #[br(count = positions2_size)]
+    #[mask]
     pub positions2: Vec<CardPosition<true, true, false>>
 }
 
 #[binrw]
-#[derive(Clone, Debug, Message)]
+#[derive(Clone, Debug, Message, Mask)]
 #[message(gm, flag = 30)]
 pub struct ConfirmDecktop {
     pub controller: CorePlayer,
@@ -349,7 +402,7 @@ pub struct ConfirmDecktop {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 31)]
 #[repr(C)]
 pub struct ConfirmCards {
@@ -361,7 +414,7 @@ pub struct ConfirmCards {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 32)]
 #[repr(C)]
 pub struct ShuffleDeck {
@@ -369,18 +422,20 @@ pub struct ShuffleDeck {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 33)]
 #[repr(C)]
 pub struct ShuffleHand {
     pub player: CorePlayer,
     pub count: u8,
     #[br(count = count)]
-    pub codes: Vec<u32>
+    #[mask]
+    #[mask_if(self.player != player)]
+    pub codes: Vec<CardCode>
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 34)]
 #[repr(C)]
 pub struct RefreshDeck {
@@ -388,7 +443,7 @@ pub struct RefreshDeck {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 35)]
 #[repr(C)]
 pub struct SwapGraveDeck {
@@ -396,7 +451,7 @@ pub struct SwapGraveDeck {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 36)]
 #[repr(C)]
 pub struct ShuffleSetCard {
@@ -412,30 +467,32 @@ pub struct ShuffleSetCard {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 37)]
 #[repr(C)]
 pub struct ReverseDeck;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 38)]
 #[repr(C)]
 pub struct DeckTop;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 39)]
 #[repr(C)]
 pub struct ShuffleExtra {
     pub player: CorePlayer,
     pub count: u8,
     #[br(count = count)]
-    pub codes: Vec<u32>
+    #[mask]
+    #[mask_if(self.player != player)]
+    pub codes: Vec<CardCode>
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 40)]
 #[repr(C)]
 pub struct NewTurn {
@@ -443,7 +500,7 @@ pub struct NewTurn {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 41)]
 #[repr(C)]
 pub struct NewPhase {
@@ -451,7 +508,7 @@ pub struct NewPhase {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 42)]
 #[repr(C)]
 pub struct ConfirmExtraTop {
@@ -463,10 +520,12 @@ pub struct ConfirmExtraTop {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 50)]
 #[repr(C)]
 pub struct Move {
+    #[mask]
+    #[mask_if(self.current.0.controller != player && !self.current.0.location.intersects(Location::Grave | Location::Overlay) && (self.current.0.location.intersects(Location::Deck | Location::Hand) || self.current.1.is_face_down()))]
     pub code: i32,
     pub previous: (CardPosition<false, false, false>, Position),
     pub current: (CardPosition<false, false, false>, Position),
@@ -474,7 +533,7 @@ pub struct Move {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 53)]
 #[repr(C)]
 pub struct PositionChange {
@@ -487,15 +546,17 @@ pub struct PositionChange {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 54)]
 #[repr(C)]
 pub struct Set {
-    pub position: (CardPosition<true, false, false>, Position)
+    #[mask]
+    pub code: i32,
+    pub position: (CardPosition<false, false, false>, Position)
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 55)]
 #[repr(C)]
 pub struct Swap {
@@ -504,7 +565,7 @@ pub struct Swap {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 56)]
 #[repr(C)]
 pub struct FieldDisabled {
@@ -512,7 +573,7 @@ pub struct FieldDisabled {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 60)]
 #[repr(C)]
 pub struct Summoning {
@@ -520,27 +581,29 @@ pub struct Summoning {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 61)]
 #[repr(C)]
 pub struct Summoned;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 62)]
 #[repr(C)]
 pub struct SpecialSummoning {
+    #[mask]
+    #[mask_if(self.position.1.is_face_down())]
     pub position: (CardPosition<true, false, false>, Position),
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 63)]
 #[repr(C)]
 pub struct SpecialSummoned;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 64)]
 #[repr(C)]
 pub struct FlipSummoning {
@@ -548,13 +611,13 @@ pub struct FlipSummoning {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 65)]
 #[repr(C)]
 pub struct FlipSummoned;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 70)]
 #[repr(C)]
 pub struct Chaining {
@@ -565,7 +628,7 @@ pub struct Chaining {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 71)]
 #[repr(C)]
 pub struct Chained {
@@ -573,7 +636,7 @@ pub struct Chained {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 72)]
 #[repr(C)]
 pub struct ChainSolving {
@@ -581,7 +644,7 @@ pub struct ChainSolving {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 73)]
 #[repr(C)]
 pub struct ChainSolved {
@@ -589,13 +652,13 @@ pub struct ChainSolved {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 74)]
 #[repr(C)]
 pub struct ChainEnd;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 75)]
 #[repr(C)]
 pub struct ChainNegated {
@@ -603,7 +666,7 @@ pub struct ChainNegated {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 76)]
 #[repr(C)]
 pub struct ChainDisabled {
@@ -611,13 +674,13 @@ pub struct ChainDisabled {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 80)]
 #[repr(C)]
 pub struct CardSelected;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 81)]
 #[repr(C)]
 pub struct RandomSelected {
@@ -629,7 +692,7 @@ pub struct RandomSelected {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 83)]
 #[repr(C)]
 pub struct BecomeTarget {
@@ -640,7 +703,7 @@ pub struct BecomeTarget {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 90)]
 #[repr(C)]
 pub struct Draw {
@@ -648,11 +711,53 @@ pub struct Draw {
     #[bw(calc(codes.len() as u8))]
     codes_size: u8,
     #[br(count = codes_size)]
-    pub codes: Vec<u32>
+    #[mask]
+    #[mask_if(self.player != player)]
+    pub codes: Vec<CardCode>
+}
+
+#[bitfield]
+#[derive(BinRead, BinWrite, Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[br(map = Self::from_bytes)]
+#[bw(map = |&x| Self::into_bytes(x))]
+#[repr(u32)]
+pub struct CardCode {
+    pub id: B28,
+    pub _padding: B3,
+    pub is_public: bool,
+}
+
+impl Mask for CardCode {
+    fn mask(&mut self) {
+        self.set_id(0);
+    }
+    fn mask_towards(&mut self, _player: CorePlayer) {
+        if !self.is_public() {
+            self.set_id(0);
+        }
+    }
+}
+
+impl<T: Mask> Mask for (T,) {
+    fn mask(&mut self) {
+        self.0.mask();
+    }
+    fn mask_towards(&mut self, player: CorePlayer) {
+        self.0.mask_towards(player);
+    }
+}
+
+impl<T: Mask, U> Mask for (T, U) {
+    fn mask(&mut self) {
+        self.0.mask();
+    }
+    fn mask_towards(&mut self, player: CorePlayer) {
+        self.0.mask_towards(player);
+    }
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 91)]
 #[repr(C)]
 pub struct Damage {
@@ -661,7 +766,7 @@ pub struct Damage {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 92)]
 #[repr(C)]
 pub struct Recover {
@@ -670,7 +775,7 @@ pub struct Recover {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 93)]
 #[repr(C)]
 pub struct Equip {
@@ -679,7 +784,7 @@ pub struct Equip {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 94)]
 #[repr(C)]
 pub struct LPUpdate {
@@ -688,7 +793,7 @@ pub struct LPUpdate {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 95)]
 #[repr(C)]
 pub struct Unequip {
@@ -696,7 +801,7 @@ pub struct Unequip {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 96)]
 #[repr(C)]
 pub struct CardTarget {
@@ -705,7 +810,7 @@ pub struct CardTarget {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 97)]
 #[repr(C)]
 pub struct CancelTarget {
@@ -714,7 +819,7 @@ pub struct CancelTarget {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 100)]
 #[repr(C)]
 pub struct PayLPCost {
@@ -723,7 +828,7 @@ pub struct PayLPCost {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 101)]
 #[repr(C)]
 pub struct AddCounter {
@@ -733,7 +838,7 @@ pub struct AddCounter {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 102)]
 #[repr(C)]
 pub struct RemoveCounter {
@@ -743,7 +848,7 @@ pub struct RemoveCounter {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 110)]
 #[repr(C)]
 pub struct Attack {
@@ -752,7 +857,7 @@ pub struct Attack {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 111)]
 #[repr(C)]
 pub struct Battle {
@@ -771,25 +876,25 @@ pub struct Battle {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 112)]
 #[repr(C)]
 pub struct AttackDisabled;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 113)]
 #[repr(C)]
 pub struct DamageStepStart;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 114)]
 #[repr(C)]
 pub struct DamageStepEnd;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 120)]
 #[repr(C)]
 pub struct MissedEffect {
@@ -798,25 +903,25 @@ pub struct MissedEffect {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 121)]
 #[repr(C)]
 pub struct BeChainTarget;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 122)]
 #[repr(C)]
 pub struct CreateRelation;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 123)]
 #[repr(C)]
 pub struct ReleaseRelation;
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 130)]
 #[repr(C)]
 pub struct TossCoin {
@@ -828,7 +933,7 @@ pub struct TossCoin {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 131)]
 #[repr(C)]
 pub struct TossDice {
@@ -840,7 +945,7 @@ pub struct TossDice {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 132)]
 #[repr(C)]
 pub struct RockPaperScissors {
@@ -848,7 +953,7 @@ pub struct RockPaperScissors {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 133)]
 #[repr(C)]
 pub struct HandResult {
@@ -864,7 +969,7 @@ pub struct HandResult {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 140)]
 #[repr(C)]
 pub struct AnnounceRace {
@@ -874,7 +979,7 @@ pub struct AnnounceRace {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 141)]
 #[repr(C)]
 pub struct AnnounceAttribute {
@@ -884,7 +989,7 @@ pub struct AnnounceAttribute {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 142)]
 #[repr(C)]
 pub struct AnnounceCard {
@@ -896,7 +1001,7 @@ pub struct AnnounceCard {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 143)]
 #[repr(C)]
 pub struct AnnounceNumber {
@@ -908,7 +1013,7 @@ pub struct AnnounceNumber {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 160)]
 #[repr(C)]
 pub struct CardHint {
@@ -918,7 +1023,7 @@ pub struct CardHint {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 161)]
 #[repr(C)]
 pub struct TagSwap {
@@ -931,7 +1036,7 @@ pub struct TagSwap {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 162)]
 #[repr(C)]
 pub struct ReloadField {
@@ -943,7 +1048,7 @@ pub struct ReloadField {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 163)]
 #[repr(C)]
 pub struct AIName {
@@ -951,7 +1056,7 @@ pub struct AIName {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 164)]
 #[repr(C)]
 pub struct ShowHint {
@@ -959,7 +1064,7 @@ pub struct ShowHint {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 165)]
 #[repr(C)]
 pub struct PlayerHint {
@@ -969,7 +1074,7 @@ pub struct PlayerHint {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 170)]
 #[repr(C)]
 pub struct MatchKill {
@@ -977,7 +1082,7 @@ pub struct MatchKill {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 180)]
 #[repr(C)]
 pub struct CustomMsg {

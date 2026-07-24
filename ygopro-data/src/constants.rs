@@ -16,7 +16,7 @@ pub enum Network {
     ClientId = 57078,
 }
 
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug, PartialOrd, Ord, Hash)]
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, Debug, PartialOrd, Ord, Hash)]
 #[brw(repr=u8)]
 #[repr(u8)]
 pub enum Netplayer {
@@ -28,13 +28,29 @@ pub enum Netplayer {
     Player6 = 5,
     Observer = 7,
     // Extended by ygopro-data
+    // TODO: Remove them. They should be in extended.
     None = 254,
     All = 255
 }
 
-impl std::default::Default for Netplayer {
-    fn default() -> Self {
-        return Netplayer::None;
+#[derive(Copy, Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
+pub enum ExtendedNetplayer {
+    Player(Netplayer),
+    Observer(u8),
+    Unknown,
+    None,
+    All
+}
+
+impl From<ExtendedNetplayer> for Netplayer {
+    fn from(value: ExtendedNetplayer) -> Self {
+        match value {
+            ExtendedNetplayer::Player(player) => player,
+            ExtendedNetplayer::Observer(_) => Netplayer::Observer,
+            ExtendedNetplayer::Unknown => Netplayer::None,
+            ExtendedNetplayer::None => Netplayer::None,
+            ExtendedNetplayer::All => Netplayer::All,
+        }
     }
 }
 
@@ -86,49 +102,48 @@ impl From<CorePlayer> for Netplayer {
     }
 }
 
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug)]
-#[brw(repr=u8)]
-pub enum TypeChange {
-    NotHost(Netplayer),
-    Host(Netplayer),
+#[derive(BinRead, BinWrite,Copy, Clone, Eq, PartialEq, Debug)]
+#[br(try_map=|v: u8| TypeChange::try_from(v))]
+#[bw(map=|v: &TypeChange| v.as_u8())]
+pub struct TypeChange {
+    pub player: Netplayer,
+    pub host: bool,
+    pub observer_index: u8
 }
 
 impl TypeChange {
     fn as_u8(&self) -> u8 {
-        match *self {
-            TypeChange::NotHost(player) => player as u8,
-            TypeChange::Host(player) => player as u8 | 0x10,
+        let mut value = self.player as u8;
+        if self.host {
+            value |= 0x10;
         }
+        value
     }
-}
-
-impl num_enum::TryFromPrimitive for TypeChange {
-    type Primitive = u8;
-    const NAME: &'static str = "TypeChange";
-
-    fn try_from_primitive(source: Self::Primitive) -> Result<Self, Self::Error> {
-        let player = Netplayer::try_from_primitive(source & 0x0f)?;
-        if (source & 0x10) != 0 {
-            Ok(TypeChange::Host(player))
-        } else {
-            Ok(TypeChange::NotHost(player))
-        }
-    }
-
-    type Error = num_enum::TryFromPrimitiveError<Netplayer>;
 }
 
 impl std::convert::TryFrom<u8> for TypeChange {
     type Error = num_enum::TryFromPrimitiveError<Netplayer>;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        Self::try_from_primitive(value)
+        let player = Netplayer::try_from_primitive(value & 0x0f)?;
+        let host = (value & 0x10) != 0;
+        Ok(TypeChange { player, host, observer_index: 0 })
     }
 }
 
 impl std::convert::From<&TypeChange> for u8 {
     fn from(value: &TypeChange) -> Self {
         value.as_u8()
+    }
+}
+
+impl std::convert::From<&TypeChange> for ExtendedNetplayer {
+    fn from(value: &TypeChange) -> Self {
+        if value.player == Netplayer::Observer {
+            ExtendedNetplayer::Observer(value.observer_index)
+        } else {
+            ExtendedNetplayer::Player(value.player)
+        }
     }
 }
 
@@ -199,29 +214,75 @@ impl std::convert::From<&PlayerChange> for u8 {
 pub enum JoinError {
     RoomFull = 0,
     WrongPassword = 1,
+    HostRefused = 2
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-#[repr(u32)]
-pub enum DeckError {
-    Lflist(u32) = 0x1,
-    OcgOnly = 0x2,
-    TcgOnly = 0x3,
-    UnknownCard(u32) = 0x4,
-    CardCount(u32) = 0x5,
-    MainCount(u32) = 0x6,
-    ExtraCount(u32) = 0x7,
-    SideCount(u32) = 0x8,
-    NotAvail = 0x9,
-}
 
-#[derive(Debug, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum ErrorMessage {
     JoinError(JoinError) = 1,
-    DeckError(DeckError) = 2,
+    DeckError(crate::data::DeckError) = 2,
     SideError = 3,
     VersionError(u16) = 4,
+}
+
+fn invalid_data(error: impl std::fmt::Display + Send + Sync + 'static) -> binrw::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()).into()
+}
+
+impl BinRead for ErrorMessage {
+    type Args<'a> = ();
+
+    fn read_options<R: std::io::prelude::Read + std::io::prelude::Seek>(
+        reader: &mut R,
+        endian: binrw::Endian,
+        args: Self::Args<'_>,
+    ) -> binrw::prelude::BinResult<Self> {
+        let value = u32::read_options(reader, endian, args)?;
+        let code = u32::read_options(reader, endian, args)?;
+        let res = match value {
+            1 => {
+                let err_type = u8::try_from(code).map_err(invalid_data)?;
+                ErrorMessage::JoinError(JoinError::try_from(err_type).map_err(|_| invalid_data("invalid JoinError"))?)
+            }
+            2 => ErrorMessage::DeckError(crate::data::DeckError::from_bytes(code.to_ne_bytes())),
+            3 => ErrorMessage::SideError,
+            4 => ErrorMessage::VersionError(u16::try_from(code).map_err(invalid_data)?),
+            _ => return Err(binrw::Error::NoVariantMatch { pos: 0 }),
+        };
+        Ok(res)
+    }
+}
+
+impl BinWrite for ErrorMessage {
+    type Args<'a> = ();
+
+    fn write_options<W: std::io::prelude::Write + std::io::prelude::Seek>(&self,
+        writer: &mut W,
+        endian: binrw::Endian,
+        args: Self::Args<'_>,
+    ) -> binrw::prelude::BinResult<()> {
+        match self {
+            ErrorMessage::JoinError(join_error) => {
+                u32::write_options(&1, writer, endian, args)?;
+                u32::write_options(&(*join_error as u8 as u32), writer, endian, args)?;
+            }
+            ErrorMessage::DeckError(deck_error) => {
+                u32::write_options(&2, writer, endian, args)?;
+                u32::write_options(&u32::from(*deck_error), writer, endian, args)?;
+            },
+            ErrorMessage::SideError => {
+                u32::write_options(&3, writer, endian, args)?;
+                u32::write_options(&0, writer, endian, args)?;
+            },
+            ErrorMessage::VersionError(version) => {
+                u32::write_options(&4, writer, endian, args)?;
+                u32::write_options(&(*version as u32), writer, endian, args)?;
+            },
+        }
+        Ok(())
+    }
 }
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug, Hash)]
@@ -628,6 +689,23 @@ pub enum Hand {
     Paper = 3
 }
 
+#[derive(PartialEq, Eq)]
+pub enum HandResult {
+    Win,
+    Draw,
+    Lose
+}
+
+impl Hand {
+    pub fn judge(&self, other: &Self) -> HandResult {
+        if self == other { return HandResult::Draw; }
+        match self {
+            Hand::Scissors => if *other == Hand::Paper { HandResult::Win } else { HandResult::Lose },
+            Hand::Rock => if *other == Hand::Scissors { HandResult::Win } else { HandResult::Lose },
+            Hand::Paper => if *other == Hand::Rock { HandResult::Win } else { HandResult::Lose },
+        }
+    }
+}
 
 bitflags! {
     #[repr(transparent)]
@@ -769,8 +847,10 @@ pub enum OperationResult {
 #[bw(map = |v: &WinReason| u8::from(*v))]
 #[repr(u8)]
 pub enum WinReason {
+    OpponentSurrender = 0,
     LPZero = 1,
     DeckOut = 2,
+    OpponentLeave = 4,
     #[num_enum(catch_all)]
     Other(u8)
 }

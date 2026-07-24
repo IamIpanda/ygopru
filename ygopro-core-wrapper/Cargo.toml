@@ -7,6 +7,8 @@ links = "ygopro-core"
 [dependencies]
 ygopro-data = { path = "../ygopro-data" }
 rand = "0.8"
+parking_lot = "0.12"
+modular-bitfield = "0.13.1"
 
 [build-dependencies]
 cc = "1"

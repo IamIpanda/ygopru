@@ -1,16 +1,15 @@
-// 对应: ../ygopro/gframe/single_duel.h, ../ygopro/gframe/single_duel.cpp
-// YGOPRO_SERVER_MODE
-
+use std::io::Cursor;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use log::warn;
 use arc_swap::ArcSwap;
+use binrw::BinRead;
+use binrw::BinWrite;
 use futures::Stream;
 use linkme::distributed_slice;
-use parking_lot::ArcMutexGuard;
-use parking_lot::RawMutex;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -18,46 +17,69 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
 use ygopro_core_wrapper::DuelSeed;
+use ygopro_core_wrapper::ProcessResultFlags;
 use ygopro_core_wrapper as core;
+use ygopro_data::constants;
 use ygopro_data::constants::*;
-use ygopro_data::data::DeckCheckError;
 use ygopro_data::data::Deck;
-use ygopro_data::message::game_message as gm;
+use ygopro_data::data::DuelOptions;
+use ygopro_data::data::Replay;
+use ygopro_data::string::FixedLengthString;
 use ygopro_data::message::ctos;
 use ygopro_data::message::stoc;
+use ygopro_data::message::gm;
+use ygopro_data::message::gm::Mask;
 use ygopro_handler::Processor;
 use ygopro_handler::RoomProvider;
-use ygopro_data::string::FixedLengthString;
+use ygopro_handler::Bundle;
+use ygopro_handler::FromRequest;
+use ygopro_handler::MessageKey;
+use ygopro_derive::handler;
+use ygopro_derive::register_to;
 
 use crate::common;
+use crate::common::Response;
+use crate::managers;
 
+pub enum Request {
+    Join { stoc_sender: mpsc::UnboundedSender<stoc::Message> },
+    Message(common::Request),
+    TimerTick,
+}
+
+type State = common::State<SingleDuel>;
 type Handler = common::Handler<SingleDuel>;
-#[distributed_slice]
-pub static HANDLERS: [Handler];
-static YGOPRO_PROCESSOR: OnceLock<ArcSwap<Processor<u8, ctos::Message, common::State<SingleDuel>, common::Response, Handler>>> = OnceLock::new();
+type HandlerKey = u8;
 
-pub fn reset_processor() -> &'static ArcSwap<Processor<u8, ctos::Message, common::State<SingleDuel>, common::Response, Handler>> {
+#[distributed_slice]
+pub static HANDLER_INFOS: [fn() -> (u8, Handler)];
+static YGOPRO_PROCESSOR: OnceLock<ArcSwap<Processor<u8, common::Request, common::State<SingleDuel>, common::Response, Handler>>> = OnceLock::new();
+pub fn reset_processor() -> &'static ArcSwap<Processor<u8, common::Request, common::State<SingleDuel>, common::Response, Handler>> {
     YGOPRO_PROCESSOR.get_or_init(|| {
         let mut processor = Processor::new();
-        for handler in HANDLERS.iter() {
-            processor.register_global(handler.clone());
+        for build in HANDLER_INFOS.iter() {
+            let (key, handler) = build();
+            processor.register(key, handler);
         }
         processor.resolve();
         ArcSwap::from(Arc::new(processor))
     })
 }
 
+impl<Req, Res> FromRequest<Req, common::State<SingleDuel>, Res> for &mut SingleDuel where Req: Send, Res: Send {
+    fn from_request(bundle: &mut Bundle<Req, common::State<SingleDuel>, Res>) -> Option<Self> {
+        Some(unsafe { &mut *(&mut bundle.state.duel as *mut SingleDuel) })
+    }
+}
 
 pub struct DuelPlayer {
     player: common::DuelPlayer,
     ready: bool,
     deck: Deck,
-    deck_error: Option<DeckCheckError>,
-    hand_result: Hand,
+    hand_result: Option<Hand>,
     time_limit: u16,
     time_compensator: u16,
     time_backed: u16,
-    stoc_sender: mpsc::UnboundedSender<stoc::Message>,
 }
 
 impl DuelPlayer {
@@ -66,15 +88,28 @@ impl DuelPlayer {
             player: common::DuelPlayer {
                 name: FixedLengthString::allocate(),
                 state: None,
+                stoc_sender,
             },
             ready: false,
             deck: Deck::new(),
-            deck_error: None,
-            hand_result: Hand::Scissors,
+            hand_result: None,
             time_limit: 0,
             time_compensator: 0,
             time_backed: 0,
-            stoc_sender,
+        }
+    }
+}
+
+impl From<common::DuelPlayer> for DuelPlayer {
+    fn from(value: common::DuelPlayer) -> Self {
+        Self {
+            player: value, 
+            ready: false,
+            deck: Deck::new(),
+            hand_result: None,
+            time_limit: 0,
+            time_compensator: 0,
+            time_backed: 0,
         }
     }
 }
@@ -88,12 +123,20 @@ impl DerefMut for DuelPlayer {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.player }
 }
 
+impl AsRef<common::DuelPlayer> for DuelPlayer {
+    fn as_ref(&self) -> &common::DuelPlayer { &self.player }
+}
+
+impl AsMut<common::DuelPlayer> for DuelPlayer {
+    fn as_mut(&mut self) -> &mut common::DuelPlayer { &mut self.player }
+}
+
 pub struct SingleDuel {
-    duel: common::DuelMode,
+    duel: common::Duel,
     players: [Option<DuelPlayer>; 2], // indexed by NetPlayer
     first_attack_player: Netplayer,
+    first_attack_decider: Netplayer,
     last_response: Netplayer,
-    turn_player: Netplayer,
     phase: Phase,
     deck_reversed: bool,
     is_match: bool,
@@ -101,17 +144,20 @@ pub struct SingleDuel {
     duel_count: u8,
     match_winner: Vec<Netplayer>,
     time_elapsed: u16,
+    // extended by actor models
     messages: Vec<stoc::Message>,
-    observers: Vec<common::DuelPlayer>,
+    observers: Vec<Option<common::DuelPlayer>>,
     observer_messages: Vec<stoc::Message>,
     observer_sender: broadcast::Sender<stoc::Message>,
-    observer_receiver: broadcast::Receiver<stoc::Message>
+    observer_receiver: broadcast::Receiver<stoc::Message>,
+    request_sender: mpsc::UnboundedSender<Request>,
+    request_receiver: Option<mpsc::UnboundedReceiver<Request>>,
+    last_init_player: Option<common::DuelPlayer>,
+    timer_task: Option<tokio::task::JoinHandle<()>>,
 }
-// IN -> (NetPlayer, CTOS::Message)
-// Out -> Vec<(NetPlayer, Wrappeed<STOC::Message>)>
 
 impl Deref for SingleDuel {
-    type Target = common::DuelMode;
+    type Target = common::Duel;
     fn deref(&self) -> &Self::Target { &self.duel }
 }
 
@@ -119,14 +165,30 @@ impl DerefMut for SingleDuel {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.duel }
 }
 
+impl AsRef<common::Duel> for SingleDuel {
+    fn as_ref(&self) -> &common::Duel { &self.duel }
+}
+
+impl AsMut<common::Duel> for SingleDuel {
+    fn as_mut(&mut self) -> &mut common::Duel { &mut self.duel }
+}
+
+impl FromRequest<common::Request, State, Response> for &mut DuelPlayer {
+    fn from_request(bundle: &mut Bundle<common::Request, State, Response>) -> Option<Self> {
+        let player = bundle.state.duel.get_player_mut(bundle.request.extra)?;
+        Some(unsafe { &mut *(player as *mut DuelPlayer) })
+    }
+}
+
 impl SingleDuel {
     pub fn new(is_match: bool, seed: DuelSeed) -> Self {
         let (observer_sender, observer_receiver) = broadcast::channel(128);
+        let (request_sender, request_receiver) = mpsc::unbounded_channel();
         Self {
-            duel: common::DuelMode {
-                host_player: Netplayer::Player1,
+            duel: common::Duel {
+                host_player: Netplayer::None,
                 host_info: Default::default(),
-                duel_stage: DuelStage::Begin,
+                stage: DuelStage::Begin,
                 duel: core::Duel::new(seed),
                 name: FixedLengthString::allocate(),
                 pass: FixedLengthString::allocate(),
@@ -146,21 +208,151 @@ impl SingleDuel {
             messages: Vec::new(),
             observer_messages: Vec::new(),
             observer_sender,
-            observer_receiver
+            observer_receiver,
+            request_sender,
+            request_receiver: Some(request_receiver),
+            last_init_player: None,
+            timer_task: None,
         }
     }
 
-    fn send(&mut self, message: stoc::Message, target: Netplayer) {
-        let masked_message = {
+    pub fn run(mut self) -> Option<tokio::task::JoinHandle<()>> {
+        let receiver = self.request_receiver.take()?;
+        let mut stream = UnboundedReceiverStream::new(receiver);
+
+        let handle = tokio::spawn(async move {
+            let processor = YGOPRO_PROCESSOR.get().expect("Processor not initialized").load_full();
+            let mut duel_container = Some(self);
+
+            while let Some(request) = stream.next().await {
+                let mut duel = duel_container.take().expect("duel taken");
+                match request {
+                    Request::Join { stoc_sender } => {
+                        if duel.last_init_player.is_some() { warn!("Two players are trying to init in the same duel.") }
+                        duel.last_init_player = Some(common::DuelPlayer::new(stoc_sender));
+                        duel_container = Some(duel);
+                    }
+                    Request::Message(request) => {
+                        if let Some(player) = duel.get_player(request.extra) {
+                            if let Some(message_type) = player.state {
+                                if ctos::MessageType::from(&request.message) != message_type {
+                                    warn!("Message type mismatch for player: {:?}", request.extra);
+                                    duel_container = Some(duel);
+                                    continue;
+                                }
+                            }
+                        }
+                        let position = request.extra;
+                        let state = common::State { duel };
+                        let bundle = Bundle { request, state, response: Default::default() };
+                        let key = bundle.request.message_key();
+                        let Bundle {
+                            request,
+                            state: common::State { mut duel },
+                            response
+                        } = processor.process_bundle(bundle, key).await;
+                        match response {
+                            ygopro_handler::extract::Response::Continue => {
+                                todo!("dispatch original request to engine");
+                            }
+                            ygopro_handler::extract::Response::Replace(message) =>
+                                duel.send(message, position),
+                            ygopro_handler::extract::Response::ReplaceMultiple(messages) => {
+                                for message in messages {
+                                    duel.send(message, position);
+                                }
+                            }
+                            ygopro_handler::extract::Response::Swallow => {}
+                            ygopro_handler::extract::Response::Stop => { break; }
+                            ygopro_handler::extract::Response::Kick => {
+                                duel.send(stoc::Message::Kick(stoc::Kick), position);
+                            }
+                        }
+                        duel_container = Some(duel);
+                    }
+                    Request::TimerTick => {
+                        if duel.host_info.time_limit > 0 {
+                            duel.time_elapsed = duel.time_elapsed.saturating_add(1);
+                            let timed_out = {
+                                let last_response = duel.last_response;
+                                duel.players[last_response as usize].as_ref()
+                                    .map_or(false, |player| duel.time_elapsed >= player.time_limit)
+                            };
+                            if timed_out {
+                                let loser = duel.to_core_player(duel.last_response);
+                                duel.win_and_end(loser, WinReason::OpponentSurrender);
+                            }
+                        }
+                        duel_container = Some(duel);
+                    }
+                }
+            }
+        });
+
+        Some(handle)
+    }
+
+    fn _send_to_player<Player>(message: stoc::Message, player: Option<&mut Player>)
+    where Player: AsMut<common::DuelPlayer> {
+        match player {
+            Some(player) => { player.as_mut().stoc_sender.send(message).ok(); },
+            None => warn!("Try to send message to a not exist user.")
+        }
+    }
+
+    fn _send_to_netplayer(&mut self, message: stoc::Message, target: Netplayer) {
+         match target {
+            Netplayer::Player1 => SingleDuel::_send_to_player(message, self.players[0].as_mut()),
+            Netplayer::Player2 => SingleDuel::_send_to_player(message, self.players[1].as_mut()),
+            Netplayer::None => (),
+            Netplayer::All => {
+                SingleDuel::_send_to_player(message.clone(), self.players[0].as_mut());
+                SingleDuel::_send_to_player(message, self.players[1].as_mut());
+            },
+            _ => warn!("Try to send message to a invalid player {:?}.", target)
+        }
+    }
+
+    fn send(&mut self, message: stoc::Message, target: ExtendedNetplayer) {
+        let masked = {
             let mut m = message.clone();
-            mask_stoc_message(&mut m);
+            if let stoc::Message::GameMessage(g) = &mut m {
+                g.message.mask();
+            }
             m
         };
         self.messages.push(message.clone());
-        self.observer_messages.push(masked_message.clone());
-        self.observer_sender.send(masked_message.clone()).ok();
-
-
+        self.observer_messages.push(masked.clone());
+        self.observer_sender.send(masked.clone()).ok();
+        match target {
+            ExtendedNetplayer::Player(netplayer) => {
+                let mut m = message;
+                if let stoc::Message::GameMessage(g) = &mut m {
+                    g.message.mask_towards(self.to_core_player(netplayer));
+                }
+                self._send_to_netplayer(m, netplayer);
+            }
+            ExtendedNetplayer::Observer(index) => {
+                SingleDuel::_send_to_player(masked, self.observers[index as usize].as_mut());
+            }
+            ExtendedNetplayer::Unknown => warn!("Try to send message to unknown user"),
+            ExtendedNetplayer::None => (),
+            ExtendedNetplayer::All => {
+                let mut m0 = message.clone();
+                let mut m1 = message.clone();
+                if let stoc::Message::GameMessage(g) = &mut m0 {
+                    g.message.mask_towards(self.to_core_player(Netplayer::Player1));
+                }
+                if let stoc::Message::GameMessage(g) = &mut m1 {
+                    g.message.mask_towards(self.to_core_player(Netplayer::Player2));
+                }
+                SingleDuel::_send_to_player(m0, self.players[0].as_mut());
+                SingleDuel::_send_to_player(m1, self.players[1].as_mut());
+                for player in self.observers.iter_mut() {
+                    SingleDuel::_send_to_player(masked.clone(), player.as_mut());
+                }
+            },
+        }
     }
 
     pub fn subscribe_observer(&self) -> impl Stream<Item = stoc::Message> {
@@ -168,6 +360,28 @@ impl SingleDuel {
         let live = BroadcastStream::new(self.observer_sender.subscribe())
             .filter_map(|result| result.ok());
         history.chain(live)
+    }
+
+    pub fn get_player(&self, player: ExtendedNetplayer) -> Option<&DuelPlayer> {
+        match player {
+            ExtendedNetplayer::Player(netplayer) => {
+                self.players[netplayer as usize].as_ref()
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_player_mut(&mut self, player: ExtendedNetplayer) -> Option<&mut DuelPlayer> {
+        match player {
+            ExtendedNetplayer::Player(netplayer) => {
+                self.players[netplayer as usize].as_mut()
+            }
+            _ => None,
+        }
+    }
+
+    pub fn observer_count(&self) -> u16 {
+        self.observers.iter().fold(0, |s, v| { s + if v.is_some(){ 1 } else { 0 } }) as u16
     }
 
     pub fn to_core_player(&self, player: Netplayer) -> CorePlayer {
@@ -185,257 +399,691 @@ impl SingleDuel {
             _ => core_player.into()
         }
     }
+
+    pub fn calculate_replay(&self) -> Replay {
+        todo!()
+    }
+
+    pub fn win_and_end(&mut self, loser: CorePlayer, reason: WinReason) {
+        let winner = loser.opponent();
+        let win_message = gm::Message::Win(gm::Win { winner, reason });
+        self.send(stoc::GameMessage { message: win_message }.into(), ExtendedNetplayer::All);
+        if self.is_match {
+            let winner_netplayer = self.to_player_index(winner);
+            self.match_winner.push(winner_netplayer);
+            self.duel_count += 1;
+        }
+        self.send(stoc::DuelEnd.into(), ExtendedNetplayer::All);
+        self.end();
+    }
+
+    pub fn end(&mut self) {
+        if let Some(timer_task) = self.timer_task.take() {
+            timer_task.abort();
+        }
+        let replay = self.calculate_replay();
+        self.send(stoc::Replay{ replay: Box::new(replay) }.into(), ExtendedNetplayer::All);
+        self.duel.end();
+    }
 }
 
+pub struct SingleDuelHost {
+    ctos_sender: mpsc::UnboundedSender<Request>,
+}
 
-impl RoomProvider<ctos::Message, stoc::Message> for SingleDuel {
+impl SingleDuelHost {
+    pub fn new(is_match: bool, seed: DuelSeed) -> (Self, tokio::task::JoinHandle<()>) {
+        let single_duel = SingleDuel::new(is_match, seed);
+        let request_sender = single_duel.request_sender.clone();
+        let handle = single_duel.run().expect("duel already started");
+        (Self { ctos_sender: request_sender }, handle)
+    }
+}
+
+impl RoomProvider<ctos::Message, stoc::Message> for SingleDuelHost {
     type ServerToClientStream = UnboundedReceiverStream<stoc::Message>;
 
     fn add(&mut self, client_to_server_stream: impl Stream<Item = ctos::Message> + Unpin + Send + 'static) -> Self::ServerToClientStream {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        let mut is_observer = true;
-        if let Some(player_index) = self.players.iter().position(|p| p.is_none()) {
-            self.players[player_index] = Some(DuelPlayer::new(sender));
-            is_observer = false;
-        } else {
-            let mut observer_stream = self.subscribe_observer();
-            let bridge_sender = sender;
-            tokio::spawn(async move {
-                while let Some(message) = observer_stream.next().await {
-                    if bridge_sender.send(message).is_err() {
-                        break;
+        let ctos_sender = self.ctos_sender.clone();
+        let (stoc_sender, stoc_receiver) = mpsc::unbounded_channel();
+        let (return_sender, return_receiver) = mpsc::unbounded_channel();
+        ctos_sender.send(Request::Join { stoc_sender }).ok();
+        
+        tokio::spawn(async move {
+            let mut ctos_stream = Box::pin(client_to_server_stream);
+            let mut stoc_stream = UnboundedReceiverStream::new(stoc_receiver);
+            let mut my_position: ExtendedNetplayer = ExtendedNetplayer::Unknown;
+            loop {
+                tokio::select! {
+                    message = ctos_stream.next() => {
+                        let message = match message {
+                            Some(message) => message,
+                            None => ctos::Message::LeaveGame(ctos::LeaveGame)
+                        };
+                        ctos_sender.send(Request::Message(common::Request { message, extra: my_position })).ok();
+                    }
+                    message = stoc_stream.next() => {
+                        if let Some(message) = message {
+                            match &message {
+                                stoc::Message::TypeChange(type_change) => my_position = (&type_change.change).into(),
+                                stoc::Message::Kick(_) => todo!(),
+                                _ => ()
+                            };
+                            return_sender.send(message).ok();
+                        }
                     }
                 }
-            });
-        }
-
-        tokio::spawn(async move {
-            let mut stream = Box::pin(client_to_server_stream);
-            while let Some(message) = stream.next().await {
-                if (is_observer) {
-                    todo!()
-                }
-                // process ctos message, produce stoc responses via sender
             }
         });
-
-        UnboundedReceiverStream::new(receiver)
+        UnboundedReceiverStream::new(return_receiver)
     }
-}
-
-fn mask_stoc_message(message: &mut stoc::Message) {
-    if let stoc::Message::GameMessage(g) = message {
-        mask_game_message(&mut g.message);
-    }
-}
-
-fn mask_game_message(message: &mut gm::Message) {
-    match message {
-        gm::Message::Move(m) => {
-            let hide = !m.current.0.location.intersects(Location::Grave | Location::Overlay)
-                && (m.current.0.location.intersects(Location::Deck | Location::Hand) || m.current.1.is_face_down());
-            if hide {
-                m.code = 0;
-            }
-        }
-        gm::Message::Set(m) => {
-            m.position.0.code = 0;
-        }
-        gm::Message::SpecialSummoning(m) => {
-            if m.position.1.is_face_down() {
-                m.position.0.code = 0;
-            }
-        }
-        gm::Message::Draw(m) => {
-            for code in &mut m.codes {
-                if (*code >> 24) & 0x80 == 0 {
-                    *code = 0;
-                }
-            }
-        }
-        gm::Message::ShuffleHand(m) => {
-            m.codes.fill(0);
-        }
-        gm::Message::ShuffleExtra(m) => {
-            m.codes.fill(0);
-        }
-        _ => {}
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum DispatchResult {
-    Continue,
-    WaitForResponse,
-    End,
-}
-
-fn process(single_duel: &mut SingleDuel) {
-    todo!()
-}
-
-fn analyze(single_duel: &mut SingleDuel, engine_buffer: &[u8]) -> DispatchResult {
-    todo!()
-}
-
-fn duel_end_proc(single_duel: &mut SingleDuel) {
-    todo!()
-}
-
-fn end_duel(single_duel: &mut SingleDuel) {
-    todo!()
-}
-
-/// Record which player (array index) the engine is waiting on.
-fn wait_for_response(single_duel: &mut SingleDuel, player: Netplayer) {
-    single_duel.last_response = player;
 }
 
 // ============== CTOS Handlers ==============
+#[handler(ctos::Response)]
+#[register_to(HANDLER_INFOS)]
+fn on_response(duel: &mut SingleDuel, response: &ctos::Response) -> Vec<stoc::Message> {
+    let mut data = vec![];
+    response.write_le(&mut Cursor::new(&mut data)).ok();
+    duel.set_responseb(&data);
+    let mut messages = vec![];
 
-fn on_response(single_duel: &mut SingleDuel, response: &ctos::Response) {
-    todo!()
-}
+    loop {
+        let result = duel.process();
+        let engine_flag = result.flags();
 
-fn on_update_deck(single_duel: &mut SingleDuel, update_deck: &ctos::UpdateDeck) {
-    todo!()
-}
-
-fn on_hand_result(single_duel: &mut SingleDuel, hand_result: &ctos::HandResult) {
-    todo!()
-}
-
-fn on_tp_result(single_duel: &mut SingleDuel, tp_result: &ctos::TpResult) {
-    todo!()
-}
-
-fn on_player_info(duel: &mut SingleDuel, player_pos: Netplayer, player_info: &ctos::PlayerInfo) {
-    match duel.players[player_pos as u8 as usize] {
-        Some(ref mut p) => {
-            p.name = player_info.name.clone();
+        if engine_flag == ProcessResultFlags::End { break; }
+        let engine_length = result.data_length() as usize;
+        if engine_length > 0 {
+            let mut buffer = vec![0u8; engine_length as usize];
+            duel.get_message(&mut buffer);
+            let mut cursor = Cursor::new(&buffer);
+            if let Ok(message) = gm::Message::read_le(&mut cursor) {
+                messages.push(stoc::Message::GameMessage(stoc::GameMessage { message }));
+            }
         }
-        None => {}
+        if engine_flag == ProcessResultFlags::Waiting { break; }
+
+    }
+    vec![]
+}
+
+#[handler(ctos::HandResult)]
+#[register_to(HANDLER_INFOS)]
+fn on_hand_result(duel: &mut SingleDuel, player: ExtendedNetplayer, hand_result: &ctos::HandResult) {
+    if let Some(player) = duel.get_player_mut(player) {
+        player.hand_result = Some(hand_result.res);
+    }
+    let (message, winner) = {
+        let (player1, player2) = duel.players.split_at_mut(1);
+        let player1 = match player1[0].as_mut() { Some(p) => p, None => return };
+        let player2 = match player2[0].as_mut() { Some(p) => p, None => return };
+        let hand1 = match player1.hand_result { Some(res) => res, None => return };
+        let hand2 = match player2.hand_result { Some(res) => res, None => return };
+        let observer_message = stoc::HandResult { hand1, hand2 };
+        let result = observer_message.judge();
+        match result {
+            constants::HandResult::Draw => {
+                player1.hand_result = None;
+                player2.hand_result = None;
+                player1.state = Some(ctos::MessageType::HandResult);
+                player2.state = Some(ctos::MessageType::HandResult);
+                duel.send(stoc::SelectHand.into(), ExtendedNetplayer::Player(Netplayer::Player1));
+                duel.send(stoc::SelectHand.into(), ExtendedNetplayer::Player(Netplayer::Player2));
+                (observer_message, Netplayer::None)
+            },
+            constants::HandResult::Win => {
+                player1.state = Some(ctos::MessageType::TpResult);
+                player2.state = None;
+                (observer_message, Netplayer::Player1)
+            },
+            constants::HandResult::Lose => {
+                player1.state = None;
+                player2.state = Some(ctos::MessageType::TpResult);
+                (observer_message, Netplayer::Player2)
+            }
+        }
+    };
+    
+    // Here we need a swapped version which make player::all don't work.
+    duel.send(message.clone().into(), ExtendedNetplayer::Player(Netplayer::Player1));
+    duel.send(message.swap_clone().into(), ExtendedNetplayer::Player(Netplayer::Player2));
+    for index in 0..duel.observers.len() {
+        if duel.observers[index].is_some() {
+            duel.send(message.clone().into(), ExtendedNetplayer::Observer(index as u8));
+        }
+    }
+    duel.send(stoc::SelectTp.into(), ExtendedNetplayer::Player(winner));
+    duel.stage = DuelStage::Firstgo;
+}
+
+#[handler(ctos::TpResult)]
+#[register_to(HANDLER_INFOS)]
+fn on_tp_result(duel: &mut SingleDuel, player: ExtendedNetplayer, tp_result: &ctos::TpResult) {
+    let tp_player = match player {
+        ExtendedNetplayer::Player(n @ (Netplayer::Player1 | Netplayer::Player2)) => n,
+        _ => { warn!("TpResult requested by non-player"); return; },
+    };
+    duel.stage = DuelStage::Dueling;
+    duel.first_attack_player = if tp_result.result == CorePlayer::FirstAttackPlayer { tp_player } else {
+        match tp_player { Netplayer::Player1 => Netplayer::Player2, _ => Netplayer::Player1 }
+    };
+    if let Some(p) = duel.players[0].as_mut() { p.state = Some(ctos::MessageType::Response); }
+    if let Some(p) = duel.players[1].as_mut() { p.state = Some(ctos::MessageType::Response); }
+    duel.players[0].as_mut().unwrap().time_limit = duel.host_info.time_limit;
+    duel.players[1].as_mut().unwrap().time_limit = duel.host_info.time_limit;
+    duel.set_player_info(CorePlayer::FirstAttackPlayer, duel.host_info.start_lp as i32, duel.host_info.start_hand as i32, duel.host_info.draw_count as i32);
+    duel.set_player_info(CorePlayer::SecondAttackPlayer, duel.host_info.start_lp as i32, duel.host_info.start_hand as i32, duel.host_info.draw_count as i32);
+    for &code in duel.players[0].as_ref().unwrap().deck.main.iter().rev() {
+        duel.new_card(code, CorePlayer::FirstAttackPlayer, CorePlayer::FirstAttackPlayer, Location::Deck, 0, Position::FacedownDefense);
+    }
+    for &code in duel.players[0].as_ref().unwrap().deck.extra.iter().rev() {
+        duel.new_card(code, CorePlayer::FirstAttackPlayer, CorePlayer::FirstAttackPlayer, Location::Extra, 0, Position::FacedownDefense);
+    }
+    for &code in duel.players[1].as_ref().unwrap().deck.main.iter().rev() {
+        duel.new_card(code, CorePlayer::SecondAttackPlayer, CorePlayer::SecondAttackPlayer, Location::Deck, 0, Position::FacedownDefense);
+    }
+    for &code in duel.players[1].as_ref().unwrap().deck.extra.iter().rev() {
+        duel.new_card(code, CorePlayer::SecondAttackPlayer, CorePlayer::SecondAttackPlayer, Location::Extra, 0, Position::FacedownDefense);
+    }
+    let deck1 = duel.query_field_count(CorePlayer::FirstAttackPlayer, Location::Deck) as u16;
+    let extra1 = duel.query_field_count(CorePlayer::FirstAttackPlayer, Location::Extra) as u16;
+    let deck2 = duel.query_field_count(CorePlayer::SecondAttackPlayer, Location::Deck) as u16;
+    let extra2 = duel.query_field_count(CorePlayer::SecondAttackPlayer, Location::Extra) as u16;
+    let start_lp = duel.host_info.start_lp as i32;
+    let duel_rule = duel.host_info.duel_rule;
+    let start = |player_type: u8| gm::Message::Start(gm::Start {
+        player_type,
+        rule: duel_rule,
+        player1_lp: start_lp,
+        player2_lp: start_lp,
+        player1_deck_count: deck1,
+        player1_extra_count: extra1,
+        player2_deck_count: deck2,
+        player2_extra_count: extra2,
+    });
+    duel.send(stoc::GameMessage { message: start(0) }.into(), ExtendedNetplayer::Player(Netplayer::Player1));
+    duel.send(stoc::GameMessage { message: start(1) }.into(), ExtendedNetplayer::Player(Netplayer::Player2));
+    let obs_message: stoc::Message = stoc::GameMessage { message: start(0x10) }.into();
+    for index in 0..duel.observers.len() {
+        if duel.observers[index].is_some() {
+            duel.send(obs_message.clone(), ExtendedNetplayer::Observer(index as u8));
+        }
+    }
+    let mut options = DuelOptions::empty();
+    if duel.host_info.no_shuffle_deck { options.insert(DuelOptions::PseudoShuffle); }
+    duel.start(options, duel.host_info.duel_rule);
+    if duel.host_info.time_limit > 0 {
+        let time_limit = duel.host_info.time_limit;
+        duel.time_elapsed = 0;
+        if let Some(player1) = duel.players[0].as_mut() {
+            player1.time_compensator = time_limit;
+            player1.time_backed = time_limit;
+        }
+        if let Some(player2) = duel.players[1].as_mut() {
+            player2.time_compensator = time_limit;
+            player2.time_backed = time_limit;
+        }
+        let sender = duel.request_sender.clone();
+        duel.timer_task = Some(tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                if sender.send(Request::TimerTick).is_err() { break; }
+            }
+        }));
     }
 }
 
+#[handler(ctos::UpdateDeck)]
+#[register_to(HANDLER_INFOS)]
+fn on_update_deck(duel: &mut SingleDuel, player: ExtendedNetplayer, update_deck: &ctos::UpdateDeck) {
+    let netplayer = match player {
+        ExtendedNetplayer::Player(n) => n,
+        _ => { warn!("UpdateDeck requested by non-player"); return; }
+    };
+    let duel_count = duel.duel_count;
+    let lflist_hash = duel.host_info.lflist as u32;
+    let rule = duel.host_info.rule;
+    let Some(duel_player) = duel.get_player_mut(player) else {
+        warn!("UpdateDeck requested by non-player");
+        return;
+    };
+    if duel_player.ready {
+        warn!("UpdateDeck requested but player is already ready");
+        return;
+    }
+    duel_player.deck = update_deck.deck.clone();
+    let deck_manager = managers::deck_manager::load();
+    let data_manager = managers::data_manager::load();
+    let lflist = deck_manager.as_ref().and_then(|dm| dm.get_lflist(lflist_hash));
+    let (Some(lflist), Some(data_manager)) = (lflist, data_manager.as_ref()) else { return; };
+    if let Err(deck_error) = duel_player.deck.prepare(
+        lflist.clone(),
+        rule,
+        |code| data_manager.get_card(code),
+    ) {
+        if duel_count == 0 {
+            duel.send(stoc::HsPlayerChange { status: PlayerChange::Notready(netplayer) }.into(), player);
+        }
+        duel.send(stoc::ErrorMessage { err: constants::ErrorMessage::DeckError(deck_error) }.into(), player);
+        return;
+    }
+    duel_player.ready = true;
+    if duel_count == 0 {
+        duel.send(stoc::HsPlayerChange { status: PlayerChange::Ready(netplayer) }.into(), ExtendedNetplayer::All);
+    } else {
+        duel.send(stoc::DuelStart.into(), player);
+        let player1_ready = duel.players[0].as_ref().map_or(false, |p| p.ready);
+        let player2_ready = duel.players[1].as_ref().map_or(false, |p| p.ready);
+        if player1_ready && player2_ready {
+            // TODO: determine tp_player based on match state
+            let tp_netplayer = Netplayer::Player1;
+            if let Some(tp) = duel.players[tp_netplayer as u8 as usize].as_mut() {
+                tp.state = Some(ctos::MessageType::TpResult);
+            }
+            let opponent = if tp_netplayer == Netplayer::Player1 { 1 } else { 0 };
+            if let Some(other) = duel.players[opponent].as_mut() {
+                other.state = None;
+            }
+            duel.send(stoc::SelectTp.into(), ExtendedNetplayer::Player(tp_netplayer));
+            duel.stage = DuelStage::Firstgo;
+        }
+    }
+}
+
+#[handler(ctos::CreateGame)]
+#[register_to(HANDLER_INFOS)]
 fn on_create_game(duel: &mut SingleDuel, create_game: &ctos::CreateGame) {
     duel.host_info = create_game.info.clone();
     duel.name = create_game.name.clone();
     duel.pass = create_game.pass.clone();
 }
 
-/// `player_pos`: array index of the joining player.
-fn on_join_game(duel: &mut SingleDuel, player_pos: Netplayer, join_game: &ctos::JoinGame) -> Result<(), stoc::Message> {
-    // let player = match duel.players.get(player_pos as usize) {
-    //     Some(Some(p)) => unsafe { &*(p as *const DuelPlayer) }, // Fuck SB rust borrow checker
-    //     _ => return Err(stoc::ErrorMessage { msg: ErrorMessage::JoinError, code: 0u32 }.into()),
-    // };
+#[handler(ctos::JoinGame)]
+#[register_to(HANDLER_INFOS)]
+fn on_join_game(duel: &mut SingleDuel, join_game: &ctos::JoinGame) -> Result<Vec<stoc::Message>, stoc::Message> {
+    if join_game.version != crate::PRO_VERSION {
+        return Err(stoc::ErrorMessage { err: constants::ErrorMessage::VersionError(crate::PRO_VERSION) }.into());
+    }
+    if join_game.pass != duel.pass {
+        return Err(stoc::ErrorMessage { err: constants::ErrorMessage::JoinError(JoinError::WrongPassword) }.into());
+    }
+    let mut response_messages = vec![];
 
-    // // ygopro have a reenter check here.
-    // // It is not needed here because the room provider limit that will not happen.
+    // calculate current user position
+    let is_creator = duel.players[0].is_none() && duel.players[1].is_none() && duel.observers.is_empty();
+    let pos = if duel.players[0].is_none() { Netplayer::Player1 }
+                                else if duel.players[1].is_none() { Netplayer::Player2 }
+                                else                              { Netplayer::Observer };
+    if is_creator { duel.host_player = pos; }
+    let observer_index = if pos == Netplayer::Observer {
+        duel.observers.iter().position(|v| v.is_none()).unwrap_or(duel.observers.len()) as u8
+    } else { 0 };
+    let observer_count = duel.observer_count();
 
-    // if join_game.version != crate::PRO_VERSION {
-    //     return Err(stoc::ErrorMessage { msg: ErrorMessage::VersionError, code: crate::PRO_VERSION as u32 }.into());
-    // }
-
-    // if join_game.pass != duel.pass {
-    //     return Err(stoc::ErrorMessage { msg: ErrorMessage::JoinError, code: 1u32 }.into());
-    // }
-
-    // let target_position = if duel.players[0].is_none() { Netplayer::Player1 }
-    //                             else if duel.players[1].is_none() { Netplayer::Player2 }
-    //                             else                              { Netplayer::Observer };
-
-    // if duel.players[0].is_none() && duel.players[1].is_none() && duel.observers == [] {
-    //     duel.host_player = Netplayer::Player1; // As first player, it is always player 1.
-    // }
-
-    // let join_game = stoc::JoinGame { info: duel.host_info.clone() };
-    // let mut type_change = stoc::TypeChange { _type: if duel.host_player as u8 == player_pos as u8  { 0x10 } else { 0 } };
-
-    // // TODO: 这里的广播是不对的，应该去掉自己。
-    // if matches!(target_position, Netplayer::Observer) {
-    //     duel.observers.push(());
-    //     type_change._type |= Netplayer::Observer as u8;
-    //     let watch_change = stoc::HsWatchChange { watch_count: duel.observers.len() as u16 };
-    //     duel.send(watch_change.into(), Player::Both, Player::None);
-    // }
-    // else {
-    //     let player_enter = stoc::HsPlayerEnter { name: Netplayer.name.clone(), pos: target_position };
-    //     duel.send(player_enter.into(), Player::Both, Player::None);
-    //     type_change._type |= target_position as u8;
-    // }
-
-    // duel.send(join_game.into(), Player::Both, Player::None);
-    // duel.send(type_change.into(), Player::Both, Player::None);
-
-    // for i in 0..2 {
-    //     if i == player_pos as usize { continue; }
-    //     let (name, ready, pos) = match &duel.players[i] {
-    //         Some(p) => (p.name.clone(), p.ready, Netplayer::try_from(i as u8).unwrap_or(Netplayer::Observer)),
-    //         None => continue,
-    //     };
-    //     duel.send(stoc::HsPlayerEnter { name, pos }.into(), player_pos, Player::None);
-    //     if ready {
-    //         let status = if i == 0 { PlayerChange::Ready(Netplayer::Player1) } else { PlayerChange::Ready(Netplayer::Player2) };
-    //         duel.send(stoc::HsPlayerChange { status }.into(), player_pos, Player::None);
-    //     }
-    // }
-    // if !duel.observers.is_empty() {
-    //     duel.send(stoc::HsWatchChange { watch_count: duel.observers.len() as u16 }.into(), player_pos, Player::None);
-    // }
-
-    Ok(())
-
-}
-
-/// `player`: array index of the leaving player.
-fn on_leave_game(single_duel: &mut SingleDuel, player: Netplayer) {
+    response_messages.push(stoc::JoinGame{ info: duel.host_info.clone() }.into());
+    response_messages.push(stoc::TypeChange{ change: constants::TypeChange { 
+        player: pos, 
+        host: is_creator, // obviously, when join game, host can only be when is creator.
+        observer_index 
+    }}.into());
     
+    // broadcast player change
+    let player = duel.last_init_player.take().expect("cannot get init player when join game");
+    if pos == Netplayer::Observer {
+        duel.send(stoc::HsWatchChange { watch_count: observer_count }.into(), ExtendedNetplayer::All);
+    } else {
+        duel.send(stoc::HsPlayerEnter { name: player.name.clone(), pos }.into(), ExtendedNetplayer::All);
+    }
+
+    // tell current user now how room is now.
+    if let Some(exist_player) = duel.players[0].as_ref() {
+        response_messages.push(stoc::HsPlayerEnter { name: exist_player.name.clone(), pos: Netplayer::Player1 }.into());
+    }
+    if let Some(exist_player) = duel.players[1].as_ref() {
+        response_messages.push(stoc::HsPlayerEnter { name: exist_player.name.clone(), pos: Netplayer::Player2 }.into());
+    }
+    if observer_count > 0 {
+        response_messages.push(stoc::HsWatchChange{ watch_count: observer_count }.into());
+    }
+
+    // actual player change
+    if pos == Netplayer::Observer {
+        duel.observers[observer_index as usize] = Some(player);
+    } else {
+        let player: DuelPlayer = player.into();
+        match pos {
+            Netplayer::Player1 => duel.players[0] = Some(player),
+            Netplayer::Player2 => duel.players[1] = Some(player),
+            _ => panic!("try to put into a illegal player pos")
+        };
+    }
+
+    Ok(response_messages)
 }
 
-/// `player`: array index of the surrendering player.
-fn on_surrender(single_duel: &mut SingleDuel, player: Netplayer) {
-    todo!()
-}
-
-fn on_time_confirm(single_duel: &mut SingleDuel) {
-    todo!()
-}
-
-/// `player`: array index of the chatting player.
-fn on_chat(single_duel: &mut SingleDuel, player: Netplayer, chat: &ctos::Chat) {
-    let chat = stoc::Chat {
-        player: todo!(),
-        msg: chat.msg.clone(),
+#[handler(ctos::HsToDuelist)]
+#[register_to(HANDLER_INFOS)]
+fn on_hs_to_duelist(duel: &mut SingleDuel, player: ExtendedNetplayer) -> Option<stoc::Message> {
+    let observer_index = if let ExtendedNetplayer::Observer(observer_index) = player {
+        observer_index as usize
+    } else {
+        warn!("HsToDuelist requested by non-observer");
+        return None;
     };
+    if duel.players[0].is_some() && duel.players[1].is_some() {
+        warn!("HsToDuelist requested but both player slots are full");
+        return None;
+    }
+    let Some(observer) = duel.observers[observer_index].take() else {
+        warn!("try to convert observer to player but observer dont exist");
+        return None;
+    };
+    let new_position = if duel.players[0].is_none() { Netplayer::Player1 } else { Netplayer::Player2 };
+    let name = observer.name.clone();
+    duel.players[new_position as u8 as usize] = Some(observer.into());
+    duel.send(stoc::HsPlayerEnter { name, pos: new_position }.into(), ExtendedNetplayer::All);
+    duel.send(stoc::HsWatchChange { watch_count: duel.observer_count() }.into(), ExtendedNetplayer::All);
+    Some(stoc::TypeChange {
+        change: TypeChange {
+            player: new_position,
+            host: false,
+            observer_index: 0,
+        }
+    }.into())
 }
 
-fn on_hs_to_duelist(single_duel: &mut SingleDuel) {
-    todo!()
+#[handler(ctos::HsToObserver)]
+#[register_to(HANDLER_INFOS)]
+fn on_hs_to_observer(duel: &mut SingleDuel, player: ExtendedNetplayer) -> Option<stoc::Message> {
+    let original_netplayer = match player {
+        ExtendedNetplayer::Player(netplayer @ (Netplayer::Player1 | Netplayer::Player2)) => netplayer,
+        _ => {
+            warn!("to_observer requested by illegal player");
+            return None;
+        },
+    };
+    let position = original_netplayer as u8 as usize;
+    let Some(player) = duel.players[position].take() else {
+        warn!("to_observer requested but player slot is empty");
+        return None;
+    };
+    duel.send(stoc::HsPlayerChange { 
+        status: PlayerChange::Observe(original_netplayer) 
+    }.into(), ExtendedNetplayer::All);
+    let observer_count = duel.observer_count();
+    let observer_slot = duel.observers.iter().position(|v| v.is_none()).unwrap_or(duel.observers.len());
+    if observer_slot == duel.observers.len() {
+        duel.observers.push(Some(player.player));
+    } else {
+        duel.observers[observer_slot] = Some(player.player);
+    }
+    duel.send(stoc::HsWatchChange { watch_count: observer_count }.into(), ExtendedNetplayer::All);
+    Some(stoc::TypeChange {
+        change: TypeChange {
+            player: Netplayer::Observer,
+            host: duel.host_player == original_netplayer,
+            observer_index: observer_slot as u8,
+        }
+    }.into())
 }
 
-fn on_hs_to_observer(single_duel: &mut SingleDuel) {
-    todo!()
+#[handler(ctos::LeaveGame)]
+#[register_to(HANDLER_INFOS)]
+fn on_leave_game(duel: &mut SingleDuel, player: ExtendedNetplayer) -> bool {
+    if player == ExtendedNetplayer::Player(duel.host_player) {
+        let new_host = if duel.players[0].is_some() && player != ExtendedNetplayer::Player(Netplayer::Player1) {
+            Netplayer::Player1
+        } else if duel.players[1].is_some() && player != ExtendedNetplayer::Player(Netplayer::Player2) {
+            Netplayer::Player2
+        } else {
+            duel.end();
+            return true;
+        };
+        duel.host_player = new_host;
+        if duel.stage == DuelStage::Begin {
+            let new_host_index = new_host as u8 as usize;
+            duel.players[new_host_index].as_mut().unwrap().ready = false;
+            duel.send(stoc::TypeChange {
+                change: TypeChange {
+                    player: new_host,
+                    host: true,
+                    observer_index: 0,
+                }
+            }.into(), ExtendedNetplayer::Player(new_host));
+        }
+    }
+
+    match player {
+        ExtendedNetplayer::Observer(observer_index) => {
+            let index = observer_index as usize;
+            duel.observers[index] = None;
+            if duel.stage == DuelStage::Begin {
+                let observer_count = duel.observers.iter().filter(|v| v.is_some()).count() as u16;
+                duel.send(stoc::HsWatchChange { watch_count: observer_count }.into(), ExtendedNetplayer::All);
+            }
+        }
+        ExtendedNetplayer::Player(leaving_netplayer) => {
+            if duel.stage == DuelStage::Begin {
+                duel.players[leaving_netplayer as u8 as usize] = None;
+                let leave_message: stoc::Message = stoc::HsPlayerChange { status: PlayerChange::Leave(leaving_netplayer) }.into();
+                duel.send(leave_message, ExtendedNetplayer::All);
+            } else {
+                if duel.stage == DuelStage::Siding {
+                    if duel.players[0].as_ref().map_or(false, |p| !p.ready) {
+                        duel.send(stoc::DuelStart.into(), ExtendedNetplayer::Player(Netplayer::Player1));
+                    }
+                    if duel.players[1].as_ref().map_or(false, |p| !p.ready) {
+                        duel.send(stoc::DuelStart.into(), ExtendedNetplayer::Player(Netplayer::Player2));
+                    }
+                }
+                if duel.stage != DuelStage::End {
+                    let winner = duel.to_core_player(leaving_netplayer).opponent();
+                    let win_message = gm::Message::Win(gm::Win {winner, reason: WinReason::OpponentLeave});
+                    duel.send(stoc::GameMessage { message: win_message }.into(),ExtendedNetplayer::All);
+                    duel.send(stoc::DuelEnd.into(), ExtendedNetplayer::All);
+                    duel.end();
+                    duel.players[leaving_netplayer as u8 as usize] = None;
+                    return true;
+                }
+            }
+            duel.players[leaving_netplayer as u8 as usize] = None;
+        }
+        ExtendedNetplayer::Unknown => {}
+        _ => {}
+    }
+    false
 }
 
-fn on_hs_ready(single_duel: &mut SingleDuel) {
-    todo!()
+#[handler(ctos::HsStart)]
+#[register_to(HANDLER_INFOS)]
+fn on_hs_start(duel: &mut SingleDuel, player: ExtendedNetplayer) {
+    let sender = match player {
+        ExtendedNetplayer::Player(n) => n,
+        _ => { warn!("HsStart requested by non-player"); return; },
+    };
+    if sender != duel.host_player {
+        warn!("HsStart requested by non-host");
+        return;
+    }
+
+    let (deck1_main, deck1_side, deck1_extra, deck2_main, deck2_side, deck2_extra) = {
+        let player1 = match duel.players[0].as_ref() { Some(p) => p, None => { warn!("HsStart: player1 missing"); return; } };
+        let player2 = match duel.players[1].as_ref() { Some(p) => p, None => { warn!("HsStart: player2 missing"); return; } };
+        if !player1.ready || !player2.ready {
+            warn!("HsStart: not all players ready");
+            return;
+        }
+        (
+            player1.deck.main.len() as u16,
+            player1.deck.side.len() as u16,
+            player1.deck.extra.len() as u16,
+            player2.deck.main.len() as u16,
+            player2.deck.side.len() as u16,
+            player2.deck.extra.len() as u16,
+        )
+    };
+
+    duel.send(stoc::DuelStart.into(), ExtendedNetplayer::All);
+
+    let player1_count = stoc::DeckCount {
+        mainc_s: deck1_main, sidec_s: deck1_side, extrac_s: deck1_extra,
+        mainc_o: deck2_main, sidec_o: deck2_side, extrac_o: deck2_extra,
+    };
+    let player2_count = stoc::DeckCount {
+        mainc_s: deck2_main, sidec_s: deck2_side, extrac_s: deck2_extra,
+        mainc_o: deck1_main, sidec_o: deck1_side, extrac_o: deck1_extra,
+    };
+    duel.send(player1_count.into(), ExtendedNetplayer::Player(Netplayer::Player1));
+    duel.send(player2_count.into(), ExtendedNetplayer::Player(Netplayer::Player2));
+
+    duel.send(stoc::SelectHand.into(), ExtendedNetplayer::Player(Netplayer::Player1));
+    duel.send(stoc::SelectHand.into(), ExtendedNetplayer::Player(Netplayer::Player2));
+
+    let (player1, player2) = duel.players.split_at_mut(1);
+    let player1 = player1[0].as_mut().unwrap();
+    let player2 = player2[0].as_mut().unwrap();
+    player1.hand_result = None;
+    player2.hand_result = None;
+    player1.state = Some(ctos::MessageType::HandResult);
+    player2.state = Some(ctos::MessageType::HandResult);
+    duel.stage = DuelStage::Finger;
 }
 
-fn on_hs_not_ready(single_duel: &mut SingleDuel) {
-    todo!()
+#[handler(ctos::Surrender)]
+#[register_to(HANDLER_INFOS)]
+fn on_surrender(duel: &mut SingleDuel, player: ExtendedNetplayer) {
+    let surrendering_player = match player {
+        ExtendedNetplayer::Player(n @ (Netplayer::Player1 | Netplayer::Player2)) => n,
+        _ => { warn!("Surrender requested by non-player"); return; },
+    };
+    if duel.stage != DuelStage::Dueling {
+        warn!("Surrender requested but not in dueling stage");
+        return;
+    }
+    let core_surrendering = duel.to_core_player(surrendering_player);
+    duel.win_and_end(core_surrendering, WinReason::OpponentSurrender);
 }
 
-fn on_hs_kick(single_duel: &mut SingleDuel, hs_kick: &ctos::HsKick) {
-    todo!()
+#[handler(ctos::TimeConfirm)]
+#[register_to(HANDLER_INFOS)]
+fn on_time_confirm(duel: &mut SingleDuel, player: ExtendedNetplayer) {
+    if duel.host_info.time_limit == 0 { return; }
+    let confirming_player = match player {
+        ExtendedNetplayer::Player(n) => n,
+        _ => { warn!("TimeConfirm requested by non-player"); return; },
+    };
+    if confirming_player != duel.last_response {
+        warn!("TimeConfirm requested by wrong player");
+        return;
+    }
+    let Some(duel_player) = duel.players[confirming_player as usize].as_mut() else {
+        warn!("TimeConfirm requested but player slot is empty");
+        return;
+    };
+    duel_player.state = Some(ctos::MessageType::Response);
+    if duel.time_elapsed < 10 && duel.time_elapsed <= duel_player.time_compensator {
+        duel_player.time_compensator -= duel.time_elapsed;
+    } else {
+        duel_player.time_limit = duel_player.time_limit.saturating_sub(duel.time_elapsed);
+    }
+    duel.time_elapsed = 0;
 }
 
-fn on_hs_start(single_duel: &mut SingleDuel) {
-    todo!()
+#[handler(ctos::Chat)]
+#[register_to(HANDLER_INFOS)]
+fn on_chat(duel: &mut SingleDuel, player: ExtendedNetplayer, chat: &ctos::Chat) {
+    let chat = stoc::Chat {
+        player: player.into(),
+        msg: chat.msg.clone()
+    };
+    duel.send(chat.into(), ExtendedNetplayer::All);
 }
 
-fn on_request_field(single_duel: &mut SingleDuel) {
+#[handler(ctos::PlayerInfo)]
+#[register_to(HANDLER_INFOS)]
+fn on_player_info(duel: &mut SingleDuel, player_info: &ctos::PlayerInfo) {
+    if let Some(player) = duel.last_init_player.as_mut() {
+        player.name = player_info.name.clone();
+    } else {
+        warn!("We receive a player_info, but no user is waiiting init.");
+    }
+}
+
+#[handler(ctos::HsReady)]
+#[register_to(HANDLER_INFOS)]
+fn on_hs_ready(duel: &mut SingleDuel, player: ExtendedNetplayer) -> Vec<stoc::Message> {
+    let netplayer = match player {
+        ExtendedNetplayer::Player(n) => n,
+        _ => { warn!("HsReady requested by non-player"); return vec![]; }
+    };
+    if duel.stage != DuelStage::Begin {
+        warn!("HsReady requested outside Begin stage");
+        return vec![];
+    }
+    let no_check_deck = duel.host_info.no_check_deck;
+    let lflist_hash = duel.host_info.lflist as u32;
+    let rule = duel.host_info.rule;
+    let Some(duel_player) = duel.get_player_mut(player) else {
+        warn!("HsReady requested by non-player");
+        return vec![];
+    };
+    if duel_player.ready {
+        warn!("HsReady requested but player is already ready");
+        return vec![];
+    }
+    if !no_check_deck {
+        let deck_manager = managers::deck_manager::load();
+        let data_manager = managers::data_manager::load();
+        let lflist = deck_manager.as_ref().and_then(|dm| dm.get_lflist(lflist_hash));
+        let (Some(lflist), Some(data_manager)) = (lflist, data_manager.as_ref()) else { return vec![]; };
+        if let Err(deck_error) = duel_player.deck.prepare(
+            lflist.clone(),
+            rule,
+            |code| data_manager.get_card(code)
+        ) {
+            duel.send(stoc::HsPlayerChange { status: PlayerChange::Notready(netplayer) }.into(), player);
+            duel.send(stoc::ErrorMessage { err: constants::ErrorMessage::DeckError(deck_error) }.into(), player);
+            return vec![];
+        }
+    }
+    duel_player.ready = true;
+    duel.send(stoc::HsPlayerChange {
+        status: PlayerChange::Ready(netplayer)
+    }.into(), ExtendedNetplayer::All);
+    vec![]
+}
+
+#[handler(ctos::HsNotReady)]
+#[register_to(HANDLER_INFOS)]
+fn on_hs_not_ready(duel: &mut SingleDuel, player: ExtendedNetplayer) {
+    if duel.stage != DuelStage::Begin { 
+        warn!("HsNotReady requested outside Begin stage"); 
+        return; 
+    }
+    let Some(duel_player) = duel.get_player_mut(player) else {
+        warn!("HsNotReady requested by non-player");
+        return;
+    };
+    if !duel_player.ready { 
+        warn!("HsNotReady requested but player is already not ready"); 
+        return 
+    }
+    duel_player.ready = false;
+    duel.send(stoc::HsPlayerChange { 
+        status: PlayerChange::Notready(player.into()) 
+    }.into(), ExtendedNetplayer::All);
+}
+
+#[handler(ctos::HsKick)]
+#[register_to(HANDLER_INFOS)]
+fn on_hs_kick() -> &'static str {
+    "kick"
+}
+
+#[handler(ctos::RequestField)]
+#[register_to(HANDLER_INFOS)]
+fn on_request_field(duel: &mut SingleDuel) {
     todo!()
 }
 
@@ -444,7 +1092,7 @@ fn on_request_field(single_duel: &mut SingleDuel) {
 /// `m.selecting_player` / `m.player` fields are `CorePlayer` (engine player id).
 /// They are translated to `Player` (array index) via `engine_to_player()` before
 /// being passed to helper functions.
-fn dispatch_game_message(single_duel: &mut SingleDuel, msg: &gm::Message) {
+fn dispatch_game_message(duel: &mut SingleDuel, msg: &gm::Message) {
     // match msg {
     //     gm::Message::Waiting(_)
     //     | gm::Message::NewTurn(_)
@@ -578,7 +1226,7 @@ fn dispatch_game_message(single_duel: &mut SingleDuel, msg: &gm::Message) {
     //         DispatchResult::WaitForResponse
     //     }
     //     gm::Message::SelectYesNo(m) => {
-    //         let player = single_duel.engine_to_player(m.selecting_player);
+    //         let player = single_duel.engine_to_player(m.selecting_player);d
     //         send_to_player_and_wait(single_duel, msg, player);
     //         DispatchResult::WaitForResponse
     //     }
@@ -675,106 +1323,106 @@ fn dispatch_game_message(single_duel: &mut SingleDuel, msg: &gm::Message) {
 
 // ============== Game Message Dispatch Helpers ==============
 
-fn broadcast_message_to_all(single_duel: &mut SingleDuel, msg: &gm::Message) {
+fn broadcast_message_to_all(duel: &mut SingleDuel, msg: &gm::Message) {
     todo!()
 }
 
-fn broadcast_with_masked_card_to_inactive(single_duel: &mut SingleDuel, msg: &gm::Message) {
+fn broadcast_with_masked_card_to_inactive(duel: &mut SingleDuel, msg: &gm::Message) {
     todo!()
 }
 
 /// `player`: array index (already translated from engine coordinates).
-fn send_to_player_and_wait(single_duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
+fn send_to_player_and_wait(duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
     todo!()
 }
 
 /// `selecting_player`: array index (already translated from engine coordinates).
-fn send_select_cards_masked_and_wait(single_duel: &mut SingleDuel, msg: &gm::Message, selecting_player: Netplayer) {
+fn send_select_cards_masked_and_wait(duel: &mut SingleDuel, msg: &gm::Message, selecting_player: Netplayer) {
     todo!()
 }
 
-fn resend_retry_to_player(single_duel: &mut SingleDuel, msg: &gm::Message) {
-    todo!()
-}
-
-/// `player`: array index (already translated from engine coordinates).
-fn send_shuffle_hand_active_full_opponent_masked(single_duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
+fn resend_retry_to_player(duel: &mut SingleDuel, msg: &gm::Message) {
     todo!()
 }
 
 /// `player`: array index (already translated from engine coordinates).
-fn send_shuffle_extra_active_full_opponent_masked(single_duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
+fn send_shuffle_hand_active_full_opponent_masked(duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
     todo!()
 }
 
 /// `player`: array index (already translated from engine coordinates).
-fn send_draw_active_full_opponent_masked(single_duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
-    todo!()
-}
-
-fn send_spsummoning_active_full_opponent_masked(single_duel: &mut SingleDuel, msg: &gm::Message) {
-    todo!()
-}
-
-fn send_move_with_masked_card_to_opponent(single_duel: &mut SingleDuel, msg: &gm::Message) {
+fn send_shuffle_extra_active_full_opponent_masked(duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
     todo!()
 }
 
 /// `player`: array index (already translated from engine coordinates).
-fn send_confirm_cards_with_deck_masked(single_duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
+fn send_draw_active_full_opponent_masked(duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
     todo!()
 }
 
-fn dispatch_hint_by_type(single_duel: &mut SingleDuel, msg: &gm::Message) {
+fn send_spsummoning_active_full_opponent_masked(duel: &mut SingleDuel, msg: &gm::Message) {
     todo!()
 }
 
-fn on_win(single_duel: &mut SingleDuel, win: &gm::Win) -> DispatchResult {
+fn send_move_with_masked_card_to_opponent(duel: &mut SingleDuel, msg: &gm::Message) {
     todo!()
 }
+
+/// `player`: array index (already translated from engine coordinates).
+fn send_confirm_cards_with_deck_masked(duel: &mut SingleDuel, msg: &gm::Message, player: Netplayer) {
+    todo!()
+}
+
+fn dispatch_hint_by_type(duel: &mut SingleDuel, msg: &gm::Message) {
+    todo!()
+}
+
+// fn on_win(duel: &mut SingleDuel, win: &gm::Win) -> DispatchResult {
+//     todo!()
+// }
 
 // ============== Refresh Helpers ==============
 // The `player` parameter is an array index; translated to engine coordinates inside.
 
 
-fn refresh_mzone(single_duel: &mut SingleDuel, player: Netplayer) {
+fn refresh_mzone(duel: &mut SingleDuel, player: Netplayer) {
     todo!()
 }
 
 
-fn refresh_szone(single_duel: &mut SingleDuel, player: Netplayer) {
+fn refresh_szone(duel: &mut SingleDuel, player: Netplayer) {
     todo!()
 }
 
 
-fn refresh_hand(single_duel: &mut SingleDuel, player: Netplayer) {
+fn refresh_hand(duel: &mut SingleDuel, player: Netplayer) {
     todo!()
 }
 
 
-fn refresh_extra(single_duel: &mut SingleDuel, player: Netplayer) {
+fn refresh_extra(duel: &mut SingleDuel, player: Netplayer) {
     todo!()
 }
 
 
-fn refresh_grave(single_duel: &mut SingleDuel, player: Netplayer) {
+fn refresh_grave(duel: &mut SingleDuel, player: Netplayer) {
     todo!()
 }
 
 
-fn refresh_removed(single_duel: &mut SingleDuel, player: Netplayer) {
+fn refresh_removed(duel: &mut SingleDuel, player: Netplayer) {
     todo!()
 }
 
-fn refresh_all(single_duel: &mut SingleDuel) {
+fn refresh_all(duel: &mut SingleDuel) {
     todo!()
 }
 
 
-fn refresh_single(single_duel: &mut SingleDuel, player: Netplayer, location: i32, sequence: i32) {
+fn refresh_single(duel: &mut SingleDuel, player: Netplayer, location: i32, sequence: i32) {
     todo!()
 }
 
-fn tick(single_duel: &mut SingleDuel) {
+fn tick(duel: &mut SingleDuel) {
     todo!()
 }
