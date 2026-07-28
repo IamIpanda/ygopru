@@ -212,14 +212,6 @@ impl BinWrite for UpdateCardInfo {
         }
         let current_pos = writer.stream_position()?;
         len = u32::try_from(current_pos - pos).map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-        // force align
-        // let rest = 4 - len % 4;
-        // if rest < 4 {
-        //     len = len + rest;
-        //     for _i in 1..=rest {
-        //         u8::write_le(&0, writer)?;
-        //     }
-        // }
         writer.seek(std::io::SeekFrom::Current(-(len as i64)))?;
         len.write_options(writer, endian, args)?;
         writer.seek(std::io::SeekFrom::Current((len - 4) as i64))?;

@@ -723,7 +723,7 @@ pub struct Draw {
 #[repr(u32)]
 pub struct CardCode {
     pub id: B28,
-    pub _padding: B3,
+    #[skip] __: B3,
     pub is_public: bool,
 }
 
@@ -898,6 +898,7 @@ pub struct DamageStepEnd;
 #[message(gm, flag = 120)]
 #[repr(C)]
 pub struct MissedEffect {
+    pub player: CorePlayer,
     pub unknown: i32,
     pub code: i32
 }
@@ -1036,15 +1037,62 @@ pub struct TagSwap {
 }
 
 #[binrw]
+#[derive(Debug, Clone, Default)]
+pub struct MzoneSlot {
+    pub occupied: u8,
+    #[br(if(occupied != 0))]
+    #[bw(if(*occupied != 0))]
+    pub position: u8,
+    #[br(if(occupied != 0))]
+    #[bw(if(*occupied != 0))]
+    pub xyz_count: u8,
+}
+
+#[binrw]
+#[derive(Debug, Clone)]
+pub struct SzonaSlot {
+    pub occupied: u8,
+    #[br(if(occupied != 0, Position::Any))]
+    #[bw(if(*occupied != 0))]
+    pub position: Position,
+}
+
+#[binrw]
+#[derive(Debug, Clone)]
+pub struct PlayerField {
+    pub lp: i32,
+    pub mzone: [MzoneSlot; 5],
+    pub szone: [SzonaSlot; 8],
+    pub main_count: u8,
+    pub hand_count: u8,
+    pub grave_count: u8,
+    pub remove_count: u8,
+    pub extra_count: u8,
+    pub extra_p_count: u8,
+}
+
+#[binrw]
+#[derive(Debug, Clone)]
+pub struct ChainLink {
+    pub code: u32,
+    pub info_location: u32,
+    pub controler: u8,
+    pub location: u8,
+    pub sequence: u8,
+    pub description: u32,
+}
+
+#[binrw]
 #[derive(Debug, Clone, Message, Mask)]
 #[message(gm, flag = 162)]
 #[repr(C)]
 pub struct ReloadField {
     pub duel_rule: MasterRule,
-    pub player1_lp: i32,
-    
-    #[br(parse_with=until_eof)]
-    pub data: Vec<u8> // gugugu
+    pub player1: PlayerField,
+    pub player2: PlayerField,
+    pub chain_count: u8,
+    #[br(count = chain_count)]
+    pub chains: Vec<ChainLink>,
 }
 
 #[binrw]

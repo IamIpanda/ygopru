@@ -16,6 +16,10 @@
 //! | `Complex<ctos::Message>` | `&ctos::$variant` | generated per variant |
 //! | `Request<Complex<stoc::Message>, Extra>` | `&stoc::$variant` | generated per variant |
 //! | `Complex<stoc::Message>` | `&stoc::$variant` | generated per variant |
+//! | `Request<gm::Message, Extra>` | `&gm::$variant` | generated per variant |
+//! | `gm::Message` | `&gm::$variant` | generated per variant |
+//! | `Request<Complex<gm::Message>, Extra>` | `&gm::$variant` | generated per variant |
+//! | `Complex<gm::Message>` | `&gm::$variant` | generated per variant |
 //!
 //! # `IntoResponse` implementations
 //!
@@ -28,7 +32,8 @@
 //! | `&'static str` | `"stop"` → Stop, `"kick"` → Kick, `"cancel"` → Swallow |
 //! | `ctos::Message` | `Replace` with self |
 //! | `stoc::Message` | `Replace` with self |
-//! | `ctos::$variant` / `stoc::$variant` | `Replace` with wrapped `Message::$variant` |
+//! | `gm::Message` | `Replace` with self |
+//! | `ctos::$variant` / `stoc::$variant` / `gm::$variant` | `Replace` with wrapped `Message::$variant` |
 //!
 //! # `MessageKey` implementations
 //!
@@ -41,10 +46,10 @@ use std::net::SocketAddr;
 
 use ygopro_data::complex::Complex;
 use ygopro_data::constants::CorePlayer;
-use ygopro_data::constants::ExtendedNetplayer;
 use ygopro_data::constants::Netplayer;
 use ygopro_data::message::ctos;
 use ygopro_data::message::stoc;
+use ygopro_data::message::gm;
 
 use crate::IntoResponse;
 use crate::handler::Bundle;
@@ -73,7 +78,6 @@ macro_rules! impl_extractable {
 impl_extractable!(SocketAddr);
 impl_extractable!(Netplayer);
 impl_extractable!(CorePlayer);
-impl_extractable!(ExtendedNetplayer);
 
 impl<Message, Extra, State, Res> FromRequest<Request<Message, Extra>, State, Res> for &Message
 where
@@ -169,6 +173,14 @@ macro_rules! impl_stoc {
     };
 }
 
+macro_rules! impl_gm {
+    ($($variant:ident = $flag:literal),* $(,)?) => {
+        $( impl_variant_ref!(gm, $variant); )*
+        $( impl_variant_complex_ref!(gm, $variant); )*
+        $( impl_variant_response!(gm, $variant); )*
+    };
+}
+
 pub enum Response<Message> {
     /// Continue processing the message as normal.
     Continue,
@@ -198,6 +210,12 @@ impl IntoResponse<Response<ctos::Message>> for ctos::Message {
 
 impl IntoResponse<Response<stoc::Message>> for stoc::Message {
     fn into_response(self) -> Response<stoc::Message> {
+        Response::Replace(self)
+    }
+}
+
+impl IntoResponse<Response<gm::Message>> for gm::Message {
+    fn into_response(self) -> Response<gm::Message> {
         Response::Replace(self)
     }
 }
@@ -269,3 +287,4 @@ where Response1: IntoResponse<Response<Message>>, Response2: IntoResponse<Respon
 
 ygopro_data::every_client_to_server_flat_message!(impl_ctos);
 ygopro_data::every_server_to_client_flat_message!(impl_stoc);
+ygopro_data::every_game_message_flat_message!(impl_gm);

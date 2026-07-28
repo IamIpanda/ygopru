@@ -59,7 +59,7 @@ pub fn check_setcode(setcode: u32, value: u32) -> bool {
 #[derive(Clone, Default, Debug)]
 pub struct Card {
     pub card: CoreCard,
-    pub ot: OT,
+    pub ot: Rule,
     pub category: Category,
     pub name: String,
     pub text: String,
@@ -119,8 +119,8 @@ impl<'row, 'stmt> TryFrom<&'row Row<'stmt>> for Card {
     fn try_from(row: &'row Row<'stmt>) -> Result<Self, Self::Error> {
         Ok(Card {
             card: CoreCard::try_from(row)?,
-            ot: OT::from_bits_retain(row.get(1)?),
-            category: Category::from_bits_retain(row.get(10)?),
+            ot: Rule::from_bits_retain(row.get(1)?),
+            category: Category::from_bits_retain(row.get::<_, i64>(10)? as u32),
             name: row.get(11)?,
             text: row.get(12)?,
             desc: [

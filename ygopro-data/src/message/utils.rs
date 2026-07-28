@@ -3,7 +3,7 @@ use binrw::BinRead;
 use binrw::BinWrite;
 
 use crate::constants::MasterRule;
-use crate::constants::OT;
+use crate::constants::Rule;
 
 pub trait PureMessage: 'static {}
 
@@ -14,8 +14,8 @@ pub trait Message: PureMessage + Debug {
 #[derive(BinRead, BinWrite, Clone, Debug)]
 #[repr(C)]
 pub struct HostInfo {
-    pub lflist: i32,
-    pub rule: OT,
+    pub lflist: u32,
+    pub rule: Rule,
     pub mode: crate::constants::Mode,
     pub duel_rule: crate::constants::MasterRule,
     #[br(map=|v:u8| v>0)]
@@ -35,7 +35,7 @@ impl Default for HostInfo {
     fn default() -> Self {
         Self { 
             lflist: 0, 
-            rule: OT::empty(),
+            rule: Rule::empty(),
             mode: crate::constants::Mode::Match, 
             duel_rule: MasterRule::MasterRule2020,
             no_check_deck: false, 

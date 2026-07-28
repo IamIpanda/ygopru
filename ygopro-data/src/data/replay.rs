@@ -13,7 +13,7 @@ use lzma_rs::lzma_compress_with_options;
 use lzma_rs::lzma_decompress_with_options;
 
 use crate::constants::Mode;
-use crate::constants::OT;
+use crate::constants::Rule;
 use crate::message::HostInfo;
 use crate::utils::string::FixedLengthString;
 use crate::data::ReplayDeck;
@@ -158,7 +158,7 @@ impl Replay {
     pub fn host_info(&self) -> HostInfo {
         HostInfo { 
             lflist: 999,
-            rule: OT::empty(),
+            rule: Rule::empty(),
             mode: self.mode(),
             duel_rule: self.duel_rule(), 
             no_check_deck: true,

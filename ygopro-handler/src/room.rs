@@ -17,10 +17,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 pub trait RoomProvider<ClientToServerMessage, ServerToClientMessage> {
     type ServerToClientStream: Stream<Item = ServerToClientMessage> + Unpin + Send + 'static;
 
-    fn add(
-        &mut self,
-        client_to_server_stream: impl Stream<Item = ClientToServerMessage> + Unpin + Send + 'static,
-    ) -> Self::ServerToClientStream;
+    fn add(&mut self, client_to_server_stream: impl Stream<Item = ClientToServerMessage> + Unpin + Send + 'static) -> Self::ServerToClientStream;
 }
 
 fn create_sender<SinkType, Data>(sink: SinkType) -> mpsc::UnboundedSender<Data>

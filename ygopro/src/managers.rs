@@ -182,7 +182,6 @@ pub mod deck_manager {
     use std::sync::Arc;
 
     use arc_swap::ArcSwapOption;
-    use hashbrown::HashMap as HbHashMap;
 
     use ygopro_data::data::parse_lflist_content;
     use ygopro_data::data::LFList;
@@ -199,14 +198,12 @@ pub mod deck_manager {
 
     pub struct DeckManager {
         pub lflists: Vec<LFList>,
-        hash_to_index: HbHashMap<u32, usize>,
     }
 
     impl DeckManager {
         pub fn new() -> Self {
             Self {
                 lflists: Vec::new(),
-                hash_to_index: HbHashMap::new(),
             }
         }
 
@@ -220,23 +217,15 @@ pub mod deck_manager {
             if !self.lflists.is_empty() {
                 self.lflists.push(LFList { hash: 0, name: "N/A".to_string(), content: HashMap::new() });
             }
-            self.rebuild_hash_index();
             Ok(())
         }
 
-        fn rebuild_hash_index(&mut self) {
-            self.hash_to_index.clear();
-            for (i, lflist) in self.lflists.iter().enumerate() {
-                self.hash_to_index.insert(lflist.hash, i);
-            }
+        pub fn get_lflist(&self, index: u32) -> Option<&LFList> {
+            self.lflists.get(index as usize)
         }
 
-        pub fn get_lflist(&self, lfhash: u32) -> Option<&LFList> {
-            self.hash_to_index.get(&lfhash).map(|&i| &self.lflists[i])
-        }
-
-        pub fn get_lflist_name(&self, lfhash: u32) -> &str {
-            self.get_lflist(lfhash)
+        pub fn get_lflist_name(&self, index: u32) -> &str {
+            self.get_lflist(index)
                 .map(|l| l.name.as_str())
                 .unwrap_or("???")
         }

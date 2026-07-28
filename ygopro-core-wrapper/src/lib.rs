@@ -23,7 +23,8 @@ use ygopro_data::data::DuelOptions;
 
 pub type intptr_t = isize;
 
-pub const SEED_COUNT: usize = 8;
+pub mod random;
+pub use random::DuelSeed;
 pub type script_reader = Option<extern "C" fn(*const c_char, *mut c_int) -> *mut u8>;
 pub type card_reader = Option<extern "C" fn(u32, *mut CoreCard) -> u32>;
 pub type message_handler = Option<extern "C" fn(intptr_t, u32) -> u32>;
@@ -51,96 +52,108 @@ unsafe extern "C" {
     pub fn set_responsei(pduel: intptr_t, value: i32);
     pub fn set_responseb(pduel: intptr_t, buf: *mut u8);
     pub fn preload_script(pduel: intptr_t, script_name: *const c_char) -> i32;
-    pub fn shuffle_deck(seeds: *const u32, deck: *mut u32, count: usize);
 }
 
 pub struct Duel {
-    pduel: intptr_t
+    duel_pointer: intptr_t,
+    shuffler: random::MTRandom,
+    ended: bool
 }
 
 static DUEL_LIFECYCLE_LOCK: Mutex<()> = Mutex::new(());
 
-pub enum DuelSeed {
-    None,
-    Single(u32),
-    Complicated([u32; SEED_COUNT]),
-}
-
 impl Duel {
     pub fn new(seed: DuelSeed) -> Self {
         let _guard = DUEL_LIFECYCLE_LOCK.lock();
-        match seed {
+        let (duel_pointer, seed_array) = match seed {
             DuelSeed::None => {
-                let seed = rand::random::<u64>();
-                Self { pduel: unsafe { create_duel(seed as u32) } }
+                let mut seeds = [0; 8];
+                for i in 0..8 {
+                    seeds[i] = rand::random();
+                }
+                (unsafe { create_duel_v2(seeds.as_ptr()) }, seeds)
             },
-            DuelSeed::Single(s) => Self { pduel: unsafe { create_duel(s) } },
-            DuelSeed::Complicated(seq) => Self { pduel: unsafe { create_duel_v2(seq.as_ptr()) } },
-        }
+            DuelSeed::Single(s) => (unsafe { create_duel(s) }, [s; 8]),
+            DuelSeed::Complicated(seq) => (unsafe { create_duel_v2(seq.as_ptr()) }, seq),
+        };
+        let shuffler = random::MTRandom::new(DuelSeed::Complicated(seed_array));
+        Self { duel_pointer, shuffler, ended: false }
     }
 
     pub fn start(&self, options: DuelOptions, rule: MasterRule) {
         let opt = ((rule as u32) << 16) | (options.bits() as u32);
-        unsafe { start_duel(self.pduel, opt) };
+        unsafe { start_duel(self.duel_pointer, opt) };
     }
 
-    pub fn end(&self) {
+    pub fn end(&mut self) {
+        if self.ended { return }
         let _guard = DUEL_LIFECYCLE_LOCK.lock();
-        unsafe { end_duel(self.pduel) };
+        unsafe { end_duel(self.duel_pointer) };
+        self.ended = true;
     }
 
-    pub fn set_player_info(&self, playerid: CorePlayer, lp: i32, startcount: i32, drawcount: i32) {
-        unsafe { set_player_info(self.pduel, playerid as i32, lp, startcount, drawcount) };
+    pub fn set_player_info(&self, player: CorePlayer, lp: i32, start_count: i32, draw_count: i32) {
+        unsafe { set_player_info(self.duel_pointer, player as i32, lp, start_count, draw_count) };
     }
 
     pub fn get_log_message(&self, buf: &mut [u8]) {
-        unsafe { get_log_message(self.pduel, buf.as_mut_ptr()) };
+        unsafe { get_log_message(self.duel_pointer, buf.as_mut_ptr()) };
     }
 
     pub fn get_message(&self, buf: &mut [u8]) -> i32 {
-        unsafe { get_message(self.pduel, buf.as_mut_ptr()) }
+        unsafe { get_message(self.duel_pointer, buf.as_mut_ptr()) }
     }
 
     pub fn process(&self) -> ProcessResult {
-        let raw = unsafe { process(self.pduel) };
+        let raw = unsafe { process(self.duel_pointer) };
         ProcessResult::from_bytes(raw.to_le_bytes())
     }
 
     pub fn new_card(&self, code: u32, owner: CorePlayer, playerid: CorePlayer, location: Location, sequence: u8, position: Position) {
-        unsafe { new_card(self.pduel, code, owner as u8, playerid as u8, location.bits(), sequence, position as u8) };
+        unsafe { new_card(self.duel_pointer, code, owner as u8, playerid as u8, location.bits(), sequence, position as u8) };
     }
 
     pub fn new_tag_card(&self, code: u32, owner: CorePlayer, location: Location) {
-        unsafe { new_tag_card(self.pduel, code, owner as u8, location.bits()) };
+        unsafe { new_tag_card(self.duel_pointer, code, owner as u8, location.bits()) };
     }
 
     pub fn query_card(&self, player: CorePlayer, location: Location, sequence: u8, query_flag: Query, buf: &mut [u8], use_cache: bool) -> i32 {
-        unsafe { query_card(self.pduel, player as u8, location.bits(), sequence, query_flag.bits(), buf.as_mut_ptr(), use_cache as i32) }
+        unsafe { query_card(self.duel_pointer, player as u8, location.bits(), sequence, query_flag.bits(), buf.as_mut_ptr(), use_cache as i32) }
     }
 
     pub fn query_field_count(&self, player: CorePlayer, location: Location) -> i32 {
-        unsafe { query_field_count(self.pduel, player as u8, location.bits()) }
+        unsafe { query_field_count(self.duel_pointer, player as u8, location.bits()) }
     }
 
     pub fn query_field_card(&self, player: CorePlayer, location: Location, query_flag: Query, buf: &mut [u8], use_cache: bool) -> i32 {
-        unsafe { query_field_card(self.pduel, player as u8, location.bits(), query_flag.bits(), buf.as_mut_ptr(), use_cache as i32) }
+        unsafe { query_field_card(self.duel_pointer, player as u8, location.bits(), query_flag.bits(), buf.as_mut_ptr(), use_cache as i32) }
     }
 
     pub fn query_field_info(&self, buf: &mut [u8]) -> i32 {
-        unsafe { query_field_info(self.pduel, buf.as_mut_ptr()) }
+        unsafe { query_field_info(self.duel_pointer, buf.as_mut_ptr()) }
     }
 
     pub fn set_responsei(&self, value: i32) {
-        unsafe { set_responsei(self.pduel, value) };
+        unsafe { set_responsei(self.duel_pointer, value) };
     }
 
     pub fn set_responseb(&self, buf: &[u8]) {
-        unsafe { set_responseb(self.pduel, buf.as_ptr() as *mut u8) };
+        unsafe { set_responseb(self.duel_pointer, buf.as_ptr() as *mut u8) };
     }
 
     pub fn preload_script(&self, script_name: &str) -> i32 {
         let cpath = CString::new(script_name).unwrap();
-        unsafe { preload_script(self.pduel, cpath.as_ptr()) }
+        unsafe { preload_script(self.duel_pointer, cpath.as_ptr()) }
+    }
+
+    pub fn shuffle_deck(&self, deck: &mut [u32]) {
+        self.shuffler.shuffle_deck(deck);
+    }
+}
+
+impl Drop for Duel {
+    fn drop(&mut self) {
+        self.end();
     }
 }
 

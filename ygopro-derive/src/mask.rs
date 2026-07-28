@@ -4,17 +4,6 @@ use syn::DeriveInput;
 use syn::parse_macro_input;
 use proc_macro::TokenStream as StdTokenStream;
 
-fn dots_to_self_field(tokens: TokenStream, field_ident: &syn::Ident) -> TokenStream {
-    let mut iter = tokens.clone().into_iter();
-    match iter.next() {
-        Some(proc_macro2::TokenTree::Punct(ref punct)) if punct.as_char() == '.' => {
-            let rest: TokenStream = iter.collect();
-            quote! { self.#field_ident . #rest }
-        }
-        _ => tokens,
-    }
-}
-
 fn is_primitive(ty: &syn::Type) -> bool {
     let syn::Type::Path(syn::TypePath { path, .. }) = ty else { return false };
     let Some(seg) = path.segments.last() else { return false };
@@ -77,7 +66,15 @@ pub fn mask(input: StdTokenStream) -> StdTokenStream {
                 }
 
                 if let Some(mask_if_attr) = mask_if_attr {
-                    let condition = dots_to_self_field(mask_if_attr.tokens.clone(), ident);
+                    let condition: TokenStream = syn::parse2::<syn::Expr>(mask_if_attr.tokens.clone())
+                        .map(|expr| match expr {
+                            syn::Expr::Paren(paren) => {
+                                let expr = paren.expr;
+                                quote! { #expr }
+                            },
+                            other => quote! { #other },
+                        })
+                        .unwrap_or_default();
                     let action = if mask_action.is_empty() {
                         let default = quote! { self.#ident = Default::default(); };
                         mask_statements.push(default.clone());

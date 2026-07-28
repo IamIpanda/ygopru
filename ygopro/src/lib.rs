@@ -7,6 +7,12 @@ use managers::*;
 pub const PRO_VERSION: u16 = 0x1362;
 
 pub fn init() {
+    init_config();
+    init_core();
+    single_duel::init();
+}
+
+pub fn init_config() {
     let config_path = std::env::var("YGOPRO_CONFIG_PATH").unwrap_or_else(|_| "system.conf".to_string());
 
     let mut config_manager = ConfigManager::new();

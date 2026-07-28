@@ -22,6 +22,12 @@ pub trait IntoResponse<Res> {
     fn into_response(self) -> Res;
 }
 
+impl<T: Send + Sync> IntoResponse<T> for T {
+    fn into_response(self) -> T {
+        self
+    }
+}
+
 pub trait FromRequest<Req, State, Res>: Sized
 where
     Req: Send,

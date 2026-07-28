@@ -5,7 +5,6 @@ use tokio::sync::mpsc;
 
 use ygopro_core_wrapper as core;
 use ygopro_data::constants::DuelStage;
-use ygopro_data::constants::ExtendedNetplayer;
 use ygopro_data::constants::Netplayer;
 use ygopro_data::message::HostInfo;
 use ygopro_data::message::ctos;
@@ -13,7 +12,7 @@ use ygopro_data::message::stoc;
 use ygopro_data::string::FixedLengthString;
 use ygopro_handler::sync_handler::SyncHandler;
 
-pub type Request = ygopro_handler::extract::Request<ctos::Message, ExtendedNetplayer>; 
+pub type Request = ygopro_handler::extract::Request<ctos::Message, Netplayer>; 
 pub type Response = ygopro_handler::extract::Response<stoc::Message>;
 pub type Handler<Duel> = SyncHandler<Request, State<Duel>, Response>;
 
@@ -51,6 +50,15 @@ impl DuelPlayer {
             state: None
         }
     }
+
+    pub fn allow_message(&self, message: &ctos::Message) -> bool {
+        let message_type = ctos::MessageType::from(message);
+        match message_type {
+            ctos::MessageType::Chat | ctos::MessageType::Surrender | ctos::MessageType::RequestField => true,
+            _ if let Some(state) = self.state => state == message_type,
+            _ => true
+        }
+    }
 }
 
 // fuck rust compiler
@@ -80,3 +88,20 @@ impl DerefMut for Duel {
         &mut self.duel
     }
 }
+
+#[derive(Clone, Copy)]
+pub enum SendTarget {
+    Single(Netplayer),
+    Except(Netplayer),
+    All,
+    AllPlayer,
+    AllObserver,
+    None
+}
+
+impl From<Netplayer> for SendTarget {
+    fn from(value: Netplayer) -> Self {
+        SendTarget::Single(value)
+    }
+}
+

@@ -7,6 +7,11 @@ use num_enum::IntoPrimitive;
 use num_enum::TryFromPrimitive;
 use num_enum::FromPrimitive;
 use bitflags::bitflags;
+use modular_bitfield::bitfield;
+use modular_bitfield::Specifier;
+use modular_bitfield::error::InvalidBitPattern;
+use modular_bitfield::error::OutOfBounds;
+use modular_bitfield::specifiers::B3;
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
 #[brw(repr=u16)]
@@ -16,41 +21,55 @@ pub enum Network {
     ClientId = 57078,
 }
 
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, Debug, PartialOrd, Ord, Hash)]
-#[brw(repr=u8)]
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
+#[br(map = |raw: u8| Netplayer::from_primitive(raw))]
+#[bw(map = |value: &Netplayer| u8::from(*value))]
 #[repr(u8)]
 pub enum Netplayer {
-    Player1 = 0,
-    Player2 = 1,
-    Player3 = 2,
-    Player4 = 3,
-    Player5 = 4,
-    Player6 = 5,
-    Observer = 7,
-    // Extended by ygopro-data
-    // TODO: Remove them. They should be in extended.
-    None = 254,
-    All = 255
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
-pub enum ExtendedNetplayer {
-    Player(Netplayer),
+    Player(u8),
     Observer(u8),
-    Unknown,
-    None,
-    All
+    Unknown = 255
 }
 
-impl From<ExtendedNetplayer> for Netplayer {
-    fn from(value: ExtendedNetplayer) -> Self {
+impl FromPrimitive for Netplayer {
+    type Primitive = u8;
+
+    fn from_primitive(number: Self::Primitive) -> Self {
+        if number <= 6 { Netplayer::Player(number) }
+        else if number == 7 { Netplayer::Observer(255) }
+        else { Netplayer::Unknown }
+    }
+}
+
+impl From<Netplayer> for u8 {
+    fn from(value: Netplayer) -> Self {
         match value {
-            ExtendedNetplayer::Player(player) => player,
-            ExtendedNetplayer::Observer(_) => Netplayer::Observer,
-            ExtendedNetplayer::Unknown => Netplayer::None,
-            ExtendedNetplayer::None => Netplayer::None,
-            ExtendedNetplayer::All => Netplayer::All,
+            Netplayer::Player(index) => index,
+            Netplayer::Observer(_) => 7,
+            Netplayer::Unknown => 255,
         }
+    }
+}
+
+impl Specifier for Netplayer {
+    const BITS: usize = 4;
+    type Bytes = u8;
+    type InOut = Self;
+
+    fn into_bytes(input: Self) -> Result<Self::Bytes, OutOfBounds> {
+        let byte = u8::from(input);
+        if byte >= (1 << Self::BITS) {
+            return Err(OutOfBounds);
+        }
+        Ok(byte)
+    }
+
+    fn from_bytes(bytes: Self::Bytes) -> Result<Self, InvalidBitPattern<Self::Bytes>> {
+        let netplayer = Netplayer::from_primitive(bytes);
+        if netplayer == Netplayer::Unknown {
+            return Err(InvalidBitPattern::new(bytes));
+        }
+        Ok(netplayer)
     }
 }
 
@@ -81,11 +100,8 @@ impl CorePlayer {
 impl From<Netplayer> for CorePlayer {
     fn from(player: Netplayer) -> Self {
         match player {
-            Netplayer::Player1 | Netplayer::Player3 | Netplayer::Player5 => CorePlayer::FirstAttackPlayer,
-            Netplayer::Player2 | Netplayer::Player4 | Netplayer::Player6 => CorePlayer::SecondAttackPlayer,
-            Netplayer::Observer => CorePlayer::None,
-            Netplayer::None => CorePlayer::None,
-            Netplayer::All => CorePlayer::All,
+            Netplayer::Player(u) => if u % 2 == 0 { CorePlayer::FirstAttackPlayer } else { CorePlayer::SecondAttackPlayer }
+            _ => CorePlayer::None
         }
     }
 }
@@ -93,120 +109,45 @@ impl From<Netplayer> for CorePlayer {
 impl From<CorePlayer> for Netplayer {
     fn from(player: CorePlayer) -> Self {
         match player {
-            CorePlayer::FirstAttackPlayer => Netplayer::Player1,
-            CorePlayer::SecondAttackPlayer => Netplayer::Player2,
-            CorePlayer::None => Netplayer::None,
-            CorePlayer::All => Netplayer::All,
-            CorePlayer::Rule => Netplayer::None,
+            CorePlayer::FirstAttackPlayer => Netplayer::Player(0),
+            CorePlayer::SecondAttackPlayer => Netplayer::Player(1),
+            CorePlayer::None => Netplayer::Unknown,
+            CorePlayer::All => Netplayer::Unknown,
+            CorePlayer::Rule => Netplayer::Unknown,
         }
     }
 }
 
-#[derive(BinRead, BinWrite,Copy, Clone, Eq, PartialEq, Debug)]
-#[br(try_map=|v: u8| TypeChange::try_from(v))]
-#[bw(map=|v: &TypeChange| v.as_u8())]
+#[bitfield]
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug)]
+#[br(map = Self::from_bytes)]
+#[bw(map = |&x| Self::into_bytes(x))]
+#[repr(u8)]
 pub struct TypeChange {
     pub player: Netplayer,
     pub host: bool,
-    pub observer_index: u8
+    #[skip] __: B3,
 }
 
-impl TypeChange {
-    fn as_u8(&self) -> u8 {
-        let mut value = self.player as u8;
-        if self.host {
-            value |= 0x10;
-        }
-        value
-    }
+#[derive(Specifier, Copy, Clone, Eq, PartialEq, Debug)]
+#[bits = 4]
+#[repr(u8)]
+pub enum PlayerChangeState {
+    Observe = 0x8,
+    Ready = 0x9,
+    Notready = 0xa,
+    Leave = 0xb,
 }
 
-impl std::convert::TryFrom<u8> for TypeChange {
-    type Error = num_enum::TryFromPrimitiveError<Netplayer>;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        let player = Netplayer::try_from_primitive(value & 0x0f)?;
-        let host = (value & 0x10) != 0;
-        Ok(TypeChange { player, host, observer_index: 0 })
-    }
-}
-
-impl std::convert::From<&TypeChange> for u8 {
-    fn from(value: &TypeChange) -> Self {
-        value.as_u8()
-    }
-}
-
-impl std::convert::From<&TypeChange> for ExtendedNetplayer {
-    fn from(value: &TypeChange) -> Self {
-        if value.player == Netplayer::Observer {
-            ExtendedNetplayer::Observer(value.observer_index)
-        } else {
-            ExtendedNetplayer::Player(value.player)
-        }
-    }
-}
-
-// Great fukcing structure design need great adapter codes.
+#[bitfield]
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug)]
-#[brw(repr=u8)]
-pub enum PlayerChange {
-    Enter(Netplayer),
-    Observe(Netplayer),
-    Ready(Netplayer),
-    Notready(Netplayer),
-    Leave(Netplayer),
+#[br(map = Self::from_bytes)]
+#[bw(map = |&x| Self::into_bytes(x))]
+#[repr(u8)]
+pub struct PlayerChange {
+    pub state: PlayerChangeState,
+    pub player: Netplayer,
 }
-
-impl PlayerChange {
-    fn as_u8(&self) -> u8 {
-        match *self {
-            PlayerChange::Enter(player) => player as u8,
-            PlayerChange::Observe(player) => player as u8 * 16 + 8,
-            PlayerChange::Ready(player) => player as u8 * 16 + 9,
-            PlayerChange::Notready(player) => player as u8 * 16 + 10,
-            PlayerChange::Leave(player) => player as u8 * 16 + 11,
-        }
-    }
-}
-
-impl num_enum::TryFromPrimitive for PlayerChange {
-    type Primitive = u8;
-    const NAME: &'static str = "PlayerChange";
-    fn try_from_primitive(source: Self::Primitive) -> Result<Self, Self::Error> {
-        if source < 8 { return Netplayer::try_from_primitive(source).map_or_else(|_| Err(num_enum::TryFromPrimitiveError { number: source }), |t| Ok(PlayerChange::Enter(t))) }
-        let position = (source & 0xf0) >> 4;
-        let player = match Netplayer::try_from_primitive(position) {
-            Ok(player) => player,
-            Err(_) => return Err(num_enum::TryFromPrimitiveError { number: source })
-        };
-        let operation = source & 0xf;
-        match operation {
-            8 => Ok(PlayerChange::Observe(player)),
-            9 => Ok(PlayerChange::Ready(player)),
-            10 => Ok(PlayerChange::Notready(player)),
-            11 => Ok(PlayerChange::Leave(player)),
-            _ => Err(num_enum::TryFromPrimitiveError { number: source })
-        }
-    }
-
-    type Error = num_enum::TryFromPrimitiveError<Self>;
-}
-
-impl std::convert::TryFrom<u8> for PlayerChange {
-    type Error = num_enum::TryFromPrimitiveError<Self>;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        Self::try_from_primitive(value)
-    }
-}
-
-impl std::convert::From<&PlayerChange> for u8 {
-    fn from(value: &PlayerChange) -> Self {
-        value.as_u8()
-    }
-}
-
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
 #[brw(repr = u8)]
@@ -712,7 +653,7 @@ bitflags! {
     #[derive(BinRead, BinWrite, Clone, Copy, Default, Debug)]
     #[br(map=|x| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
-    pub struct OT: u32 {
+    pub struct Rule: u8 {
         const OCG = 1;
         const TCG = 2;
         const Custom = 4;
@@ -850,6 +791,7 @@ pub enum WinReason {
     OpponentSurrender = 0,
     LPZero = 1,
     DeckOut = 2,
+    Timeout = 3,
     OpponentLeave = 4,
     #[num_enum(catch_all)]
     Other(u8)

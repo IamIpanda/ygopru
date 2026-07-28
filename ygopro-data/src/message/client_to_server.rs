@@ -41,6 +41,8 @@ pub struct HandResult {
 #[message(ctos, flag = 4)]
 #[repr(C)]
 pub struct TpResult {
+    #[br(map = |v: CorePlayer| v.opponent())]
+    #[bw(map = |v: &CorePlayer| v.opponent())]
     pub result: CorePlayer
 }
 

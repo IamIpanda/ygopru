@@ -3,6 +3,10 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    println!("cargo:rerun-if-changed=ocgcore/");
+    println!("cargo:rerun-if-changed=lua/");
+    println!("cargo:rerun-if-changed=src/random.cpp");
+
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let ocgcore_dir = root.join("ocgcore");
     let lua_dir = root.join("lua");
@@ -31,16 +35,14 @@ fn main() {
     build.include(&ocgcore_dir);
     build.include(&lua_dir);
 
-    if cfg!(target_os = "macos") {
-        build.flag("-Wno-deprecated-declarations");
-    }
+    build.flag("-Wno-deprecated-declarations");
 
     for entry in glob(ocgcore_dir.join("*.cpp").to_str().unwrap()).unwrap() {
         let path = entry.unwrap();
         build.file(&path);
     }
 
-    build.file(root.join("src").join("shuffle_deck.cpp"));
+    build.file(root.join("src").join("random.cpp"));
 
     build.compile("ygopro-core");
 }

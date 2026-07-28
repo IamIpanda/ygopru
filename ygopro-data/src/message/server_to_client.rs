@@ -5,6 +5,8 @@ use binrw::BinRead;
 use binrw::BinWrite;
 use ygopro_derive::Message;
 
+use crate::constants;
+use crate::constants::CorePlayer;
 use crate::generate_enum;
 use crate::constants::Netplayer;
 use crate::constants::PlayerChange;
@@ -117,11 +119,34 @@ pub struct JoinGame {
     pub info: HostInfo
 }
 
+// In rust ygopro, due to actor model, we must rememeber the observer index
+// which dont exist in C++ version. Netplayer is a enum which contains necessary
+// message, but will lost observer index when into bytes.
+// So we set it different with other here. stoc::TypeChange keep all message.
+// but constants::TypeChange will discard the observer index.
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
+#[br(map = |v: constants::TypeChange| v.into() )]
+#[bw(map = |v| constants::TypeChange::from(v))]
 #[message(stoc, flag = 19)]
 #[repr(C)]
 pub struct TypeChange {
-    pub change: crate::constants::TypeChange,
+    pub player: Netplayer,
+    pub host: bool,
+}
+
+impl From<&TypeChange> for constants::TypeChange {
+    fn from(value: &TypeChange) -> Self {
+        Self::new().with_host(value.host).with_player(value.player)
+    }
+}
+
+impl From<constants::TypeChange> for TypeChange {
+    fn from(value: constants::TypeChange) -> Self {
+        Self {
+            player: value.player(),
+            host: value.host()
+        }
+    }
 }
  
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
@@ -155,7 +180,7 @@ pub struct Replay {
 #[repr(C)]
 pub struct TimeLimit {
     #[brw(pad_after = 1)]
-    pub player: Netplayer,
+    pub player: CorePlayer,
     pub left_time: u16
 }
 
@@ -183,6 +208,12 @@ pub struct HsPlayerChange {
     pub status: PlayerChange
 }
 
+impl From<PlayerChange> for HsPlayerChange {
+    fn from(value: PlayerChange) -> Self {
+        HsPlayerChange { status: value }
+    }
+}
+
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
 #[message(stoc, flag = 34)]
 #[repr(C)]
@@ -194,12 +225,6 @@ pub struct HsWatchChange {
 #[message(stoc, flag = 48)]
 #[repr(C)]
 pub struct FieldFinish;
-
-// extended by rust ygopro
-#[derive(BinRead, BinWrite, Debug, Clone, Message)]
-#[message(stoc, flag = 251)]
-#[repr(C)]
-pub struct Kick;
 
 #[cfg(test)]
 mod test {

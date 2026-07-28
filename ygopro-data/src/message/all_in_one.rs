@@ -46,7 +46,7 @@ impl From<MessageType> for u8 {
         match value {
             MessageType::STOC(message_type) => message_type.into(),
             MessageType::CTOS(message_type) => message_type.into(),
-            MessageType::GM(_) => server_to_client::MessageType::GameMessage.into(),
+            MessageType::GM(message_type) => message_type.into(),
             MessageType::Other(_, code) => code,
         }
     }

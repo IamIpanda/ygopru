@@ -4,6 +4,7 @@ use syn::ItemFn;
 use syn::NestedMeta;
 use syn::Path;
 use syn::Ident;
+use syn::Token;
 
 pub struct ParsedArgs {
     #[allow(dead_code)]
@@ -61,14 +62,52 @@ pub fn parse_args(attr: &[NestedMeta]) -> Result<ParsedArgs, syn::Error> {
     Ok(ParsedArgs { key, priority })
 }
 
+pub struct RegisterInfo {
+    #[allow(dead_code)]
+    pub slice_expression: syn::Expr,
+    pub handler_type: syn::Type,
+    pub key_type: syn::Type,
+}
+
+pub fn parse_register_info(tokens: TokenStream2) -> syn::Result<RegisterInfo> {
+    syn::parse::Parser::parse2(
+        |input: syn::parse::ParseStream| {
+            let slice_expression = input.parse::<syn::Expr>()?;
+
+            let handler_type = if input.peek(Token![as]) {
+                input.parse::<Token![as]>()?;
+                input.parse::<syn::Type>()?
+            } else {
+                syn::parse_str::<syn::Type>("Handler")?
+            };
+
+            let key_type = if input.fork().parse::<syn::Ident>().map_or(false, |ident| ident == "with") {
+                input.parse::<syn::Ident>()?;
+                input.parse::<syn::Type>()?
+            } else {
+                syn::parse_str::<syn::Type>("u8")?
+            };
+
+            Ok(RegisterInfo { slice_expression, handler_type, key_type })
+        },
+        tokens,
+    )
+}
+
+fn extract_type_suffix(ty: &syn::Type) -> String {
+    match ty {
+        syn::Type::Path(type_path) => {
+            type_path.path.segments.last()
+                .map(|seg| seg.ident.to_string().to_lowercase())
+                .unwrap_or_else(|| "handler".to_string())
+        }
+        _ => "handler".to_string(),
+    }
+}
+
 pub fn shared_impl(args: ParsedArgs, function: ItemFn) -> TokenStream2 {
     let function_ident = &function.sig.ident;
     let function_name = function_ident.to_string();
-
-    let builder_ident = Ident::new(
-        &format!("build_handle_{function_name}"),
-        function_ident.span(),
-    );
 
     let priority = args.priority
         .map(|lit| quote! { #lit })
@@ -76,40 +115,75 @@ pub fn shared_impl(args: ParsedArgs, function: ItemFn) -> TokenStream2 {
 
     let key = args.key;
 
-    quote! { 
-        #function 
-
-        fn #builder_ident() -> (HandlerKey, Handler) {
-            (
-                ::std::convert::Into::<HandlerKey>::into(<#key as ::ygopro_data::message::Message>::message_type()),
-                Handler::new(#priority, #function_name, module_path!(), #function_ident),
-            )
+    let mut register_infos = Vec::new();
+    for attr in &function.attrs {
+        if attr.path.is_ident("register_to") {
+            if let Ok(info) = parse_register_info(attr.tokens.clone()) {
+                register_infos.push(info);
+            }
         }
     }
-}
 
-pub fn register_to_impl(slice_idents: Vec<Ident>, function: ItemFn) -> TokenStream2 {
-    let function_ident = &function.sig.ident;
-    let function_name = function_ident.to_string();
+    if register_infos.is_empty() {
+        let error = syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("no #[register_to] attribute found on handler `{function_name}`"),
+        ).to_compile_error();
+        return quote! {
+            #error
+            #function
+        };
+    }
 
-    let builder_ident = Ident::new(
-        &format!("build_handle_{function_name}"),
-        function_ident.span(),
-    );
-
-    let register_statics: Vec<_> = slice_idents.iter().enumerate().map(|(index, slice_ident)| {
-        let register_ident = Ident::new(
-            &format!("REGISTER_{}_{}", function_ident.to_string().to_uppercase(), index),
+    let registrations: Vec<_> = register_infos.iter().map(|info| {
+        let suffix = extract_type_suffix(&info.handler_type);
+        let builder_ident = Ident::new(
+            &format!("build_handle_{function_name}_{suffix}"),
             function_ident.span(),
         );
+        let key_type = &info.key_type;
+        let handler_type = &info.handler_type;
+
         quote! {
-            #[linkme::distributed_slice(#slice_ident)]
-            static #register_ident: fn() -> (HandlerKey, Handler) = #builder_ident;
+            fn #builder_ident() -> (#key_type, #handler_type) {
+                (
+                    ::std::convert::Into::<#key_type>::into(<#key as ::ygopro_data::message::Message>::message_type()),
+                    #handler_type::new(#priority, #function_name, module_path!(), #function_ident),
+                )
+            }
         }
     }).collect();
 
     quote! {
         #function
-        #(#register_statics)*
+        #(#registrations)*
+    }
+}
+
+pub fn register_to_impl(info: RegisterInfo, function: ItemFn) -> TokenStream2 {
+    let function_ident = &function.sig.ident;
+    let function_name = function_ident.to_string();
+
+    let suffix = extract_type_suffix(&info.handler_type);
+
+    let builder_ident = Ident::new(
+        &format!("build_handle_{function_name}_{suffix}"),
+        function_ident.span(),
+    );
+
+    let register_ident = Ident::new(
+        &format!("REGISTER_{}_{}", function_ident.to_string().to_uppercase(), suffix.to_uppercase()),
+        function_ident.span(),
+    );
+
+    let slice_expression = &info.slice_expression;
+    let key_type = &info.key_type;
+    let handler_type = &info.handler_type;
+
+    quote! {
+        #function
+
+        #[linkme::distributed_slice(#slice_expression)]
+        static #register_ident: fn() -> (#key_type, #handler_type) = #builder_ident;
     }
 }

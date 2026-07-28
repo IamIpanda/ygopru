@@ -214,6 +214,18 @@ pub mod complex {
         pub message: OnceLock<Message>,
     }
 
+    /// Each clone shares the raw bytes via `Bytes::clone` (refcount bump)
+    /// but starts with a fresh deserialization cache.
+    /// This avoids coupling the deserialization timing of clones.
+    impl<Message> Clone for Complex<Message> {
+        fn clone(&self) -> Self {
+            Self {
+                data: self.data.clone(),
+                message: OnceLock::new(),
+            }
+        }
+    }
+
     impl<Message: BinRead> Complex<Message> where for<'a> <Message as BinRead>::Args<'a>: Default {
         pub fn new(data: Bytes) -> Self {
             Self {
@@ -255,6 +267,17 @@ pub mod complex {
 
         fn write_options<W: Write>(&self, writer: &mut W, _endian: binrw::Endian, _args: Self::Args<'_>) -> binrw::BinResult<()> {
             writer.write_all(&self.data).map_err(binrw::Error::from)
+        }
+    }
+
+    impl<Message> From<Message> for Complex<Message>
+    where
+        Message: BinRead + BinWrite,
+        for<'a> <Message as BinRead>::Args<'a>: Default,
+        for<'a> <Message as BinWrite>::Args<'a>: Default,
+    {
+        fn from(message: Message) -> Self {
+            Self::from_message(message)
         }
     }
 }

@@ -9,7 +9,7 @@ use modular_bitfield::bitfield;
 use num_enum::IntoPrimitive;
 use num_enum::TryFromPrimitive;
 
-use crate::constants::OT;
+use crate::constants::Rule;
 use crate::constants::Type;
 use crate::data::Card;
 use crate::data::LFList;
@@ -20,7 +20,7 @@ const EXTRA_MAX: usize = 15;
 const SIDE_MAX: usize = 15;
 
 #[binrw]
-#[derive(PartialEq, Eq, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Deck {
     #[bw(calc = main.len() as u32 + extra.len() as u32)]
     main_size: u32,
@@ -45,27 +45,35 @@ impl Deck {
         d.side.extend_from_slice(&codes[mc..mc + sc]);
         d
     }
-}
 
-pub fn side_from_codes(deck: &mut Deck, codes: &[u32], mainc: usize, sidec: usize) -> bool {
-    let mc = mainc.min(codes.len());
-    let sc = sidec.min(codes.len().saturating_sub(mc));
-    if mc + sc > codes.len() { return false; }
-    deck.main.clear();
-    deck.main.extend_from_slice(&codes[..mc]);
-    deck.side.clear();
-    deck.side.extend_from_slice(&codes[mc..mc + sc]);
-    true
-}
+    pub fn get_hash(&self) -> HashMap<u32, usize> {
+        let mut counts: HashMap<u32, usize> = HashMap::new();
+        for &code in self.main.iter().chain(self.extra.iter()).chain(self.side.iter()) {
+            *counts.entry(code).or_insert(0) += 1;
+        }
+        counts 
+    }
 
-impl Deck {
-    pub fn prepare<'a>(&mut self, lflist: LFList, rule: OT, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Result<(), DeckError> {
+    pub fn load<'a>(&mut self, resolve_card: impl Fn(u32) -> Option<&'a Card>) {
         self.separate(|c| resolve_card(c).map(|c| c.card_type).unwrap_or(Type::empty()));
         self.remove(|c| resolve_card(c).map(|c| c.card_type));
+    }
+
+    pub fn prepare<'a>(&mut self, lflist: &LFList, rule: Rule, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Result<(), DeckError> {
+        self.load(&resolve_card);
         self.check(&lflist.content, rule, 
-            |c| resolve_card(c).map(|c| c.ot).unwrap_or(OT::empty()), 
+            |c| resolve_card(c).map(|c| c.ot).unwrap_or(Rule::empty()), 
             |c| resolve_card(c).map(|c| c.card_type).unwrap_or(Type::empty()),
             |c| resolve_card(c).map(|c| c.duel_code()).unwrap_or(0))
+    }
+
+    pub fn check_after_replacing_side<'a>(&self, deck: &mut Deck, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Result<(), DeckError> {
+        deck.separate(|c| resolve_card(c).map(|c| c.card_type).unwrap_or(Type::empty()));
+        if self == deck {
+            Ok(())
+        } else {
+            Err(DeckError::new().with_error_type(DeckErrorType::SideCount))
+        }
     }
 
     pub fn separate(&mut self, resolve_type: impl Fn(u32) -> Type) {
@@ -73,10 +81,10 @@ impl Deck {
     }
 
     pub fn remove(&mut self, get_type: impl Fn(u32) -> Option<Type>) {
-        remove_illegal_cards(&mut self.main, get_type);
+        remove_misplaced_cards(&mut self.main, get_type);
     }
 
-    pub fn check(&self, lflist: &HashMap<u32, u8>, rule: OT, get_rule: impl Fn(u32) -> OT, get_type: impl Fn(u32) -> Type, resolve_code: impl Fn(u32) -> u32) -> Result<(), DeckError> {
+    pub fn check(&self, lflist: &HashMap<u32, u8>, rule: Rule, get_rule: impl Fn(u32) -> Rule, get_type: impl Fn(u32) -> Type, resolve_code: impl Fn(u32) -> u32) -> Result<(), DeckError> {
         check_deck_length(&self.main, &self.extra, &self.side)?;
         check_illegal_cards(&self.main, &self.side, &self.extra, get_type)?;
         let iter = self.main.iter().chain(self.extra.iter()).chain(self.side.iter());
@@ -84,6 +92,19 @@ impl Deck {
         check_deck_lflists(iter, lflist, resolve_code)
     }
 }
+
+impl PartialEq for Deck {
+    fn eq(&self, other: &Self) -> bool {
+        if self.main.len() != other.main.len() 
+            || self.side.len() != other.side.len()
+            || self.extra.len() != other.extra.len() {
+            return false;
+        }
+        self.get_hash() == other.get_hash()
+    }
+}
+
+impl Eq for Deck {}
 
 #[binrw]
 #[derive(PartialEq, Eq, Debug, Clone, Default)]
@@ -100,8 +121,6 @@ pub struct ReplayDeck {
     pub extra: Vec<u32>,
 }
 
-const DECK_ERROR_CODE_MASK: u32 = 0x0FFFFFFF;
-
 #[derive(Specifier, Clone, Copy, Debug, IntoPrimitive, TryFromPrimitive, PartialEq, Eq)]
 #[bits = 4]
 #[repr(u8)]
@@ -114,7 +133,7 @@ pub enum DeckErrorType {
     MainCount = 0x6,
     ExtraCount = 0x7,
     SideCount = 0x8,
-    NotAvailable = 0x9,
+    NRuleAvailable = 0x9,
 }
 
 #[bitfield]
@@ -155,7 +174,7 @@ pub fn check_deck_length(main: &[u32], extra: &[u32], side: &[u32]) -> Result<()
     Ok(())
 }
 
-pub fn remove_illegal_cards(main: &mut Vec<u32>, get_type: impl Fn(u32) -> Option<Type>) {
+pub fn remove_misplaced_cards(main: &mut Vec<u32>, get_type: impl Fn(u32) -> Option<Type>) {
     main.retain(|code| {
         if let Some(_type) = get_type(*code) {
             return !_type.intersects(EXTRA_TYPE)
@@ -185,13 +204,13 @@ pub fn check_illegal_cards(main: &Vec<u32>, side: &Vec<u32>, ex: &Vec<u32>, get_
     Ok(())
 }
 
-pub fn check_rule<'a>(codes: impl Iterator<Item = &'a u32>, rule: OT, get_rule: impl Fn(u32) -> OT) -> Result<(), DeckError> {
+pub fn check_rule<'a>(codes: impl Iterator<Item = &'a u32>, rule: Rule, get_rule: impl Fn(u32) -> Rule) -> Result<(), DeckError> {
     if rule.is_empty() { return Ok(()); }
     for &code in codes {
-        let ot = get_rule(code);
-        if ot.contains(rule) { continue; }
-        if rule.contains(OT::OCG) { return Err(DeckError::new().with_error_type(DeckErrorType::OcgOnly).with_code(code)); }
-        if rule.contains(OT::TCG) { return Err(DeckError::new().with_error_type(DeckErrorType::TcgOnly).with_code(code)); }
+        let card_rule = get_rule(code);
+        if card_rule.contains(rule) { continue; }
+        if rule.contains(Rule::OCG) { return Err(DeckError::new().with_error_type(DeckErrorType::OcgOnly).with_code(code)); }
+        if rule.contains(Rule::TCG) { return Err(DeckError::new().with_error_type(DeckErrorType::TcgOnly).with_code(code)); }
     }
     Ok(())
 }
@@ -211,3 +230,4 @@ pub fn check_deck_lflists<'a>(codes: impl Iterator<Item = &'a u32>, lflist: &Has
     }
     Ok(())
 }
+
