@@ -6,5 +6,5 @@ members = [
     "ygopro-core-wrapper",
     "ygopro-handler",
     "ygopro",
-    "ygopro-proxy"
+    "ygopro-toolkits"
 ]

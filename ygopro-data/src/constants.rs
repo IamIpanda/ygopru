@@ -250,7 +250,7 @@ bitflags! {
         const Removed = 0x20;
         const Extra = 0x40;
         const Overlay = 0x80;
-        // OnField = 0xc;
+        const OnField = 0xc;
         // FZone = 0x100,
         // PZone = 0x200,
         // DeckBot = 0x10001,
@@ -258,25 +258,28 @@ bitflags! {
     }
 }
 
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
-#[brw(repr=u8)]
-#[repr(u8)]
-pub enum Position {
-    Any = 0,
-    FaceupAttack = 0x1,
-    FaceDownAttack = 0x2,
-    FaceupDefense = 0x4,
-    FacedownDefense = 0x8,
-    Faceup = 0x5,
-    Facedown = 0xa,
-    Attack = 0x3,
-    Defense = 0xc,
-    // NoFlipEffect = 0x10000
+bitflags! {
+    #[repr(transparent)]
+    #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug)]
+    #[br(map=|x| Self::from_bits_retain(x))]
+    #[bw(map=|x: &Self| x.bits())]
+    pub struct Position: u8 {
+        const Any = 0;
+        const FaceupAttack = 0x1;
+        const FaceDownAttack = 0x2;
+        const FaceupDefense = 0x4;
+        const FacedownDefense = 0x8;
+        const Faceup = 0x5;
+        const Facedown = 0xa;
+        const Attack = 0x3;
+        const Defense = 0xc;
+        // NoFlipEffect = 0x10000
+    }
 }
 
 impl Position {
     pub fn is_face_down(&self) -> bool {
-        matches!(self, Position::FaceDownAttack | Position::FacedownDefense | Position::Facedown)
+        self.intersects(Position::Facedown)
     }
 }
 
@@ -532,7 +535,7 @@ bitflags! {
     }
 }
 
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, TryFromPrimitive, IntoPrimitive, Debug)]
 #[brw(repr=u8)]
 #[repr(u8)]
 pub enum DuelStage {
@@ -702,10 +705,11 @@ bitflags! {
     }
 }
 
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]
-#[brw(repr=u32)]
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, FromPrimitive, IntoPrimitive, Debug)]
+#[br(map = |v: u32| Operation::from(v))]
+#[bw(map = |v: &Operation| u32::from(*v))]
 #[repr(u32)]
-pub enum OperationCode {
+pub enum Operation {
     Add = 0x40000000,
     Subtract = 0x40000001,
     Multiply = 0x40000002,
@@ -719,6 +723,8 @@ pub enum OperationCode {
     IsType = 0x40000102,
     IsRace = 0x40000103,
     IsAttribute = 0x40000104,
+    #[num_enum(catch_all)]
+    Operand(u32)
 }
 
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug)]

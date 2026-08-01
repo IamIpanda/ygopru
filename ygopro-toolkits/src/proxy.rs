@@ -12,28 +12,28 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::FramedRead;
 use tokio_util::codec::FramedWrite;
 use tokio_util::codec::LengthDelimitedCodec;
-use ygopro::message::{client_to_server, server_to_client};
+use ygopro_data::message::{client_to_server, server_to_client};
 
-use crate::config::CONFIG;
-
-pub async fn run_proxy() {
-    let server_addr: SocketAddr = format!("{}:{}", "0.0.0.0", CONFIG.port).parse().expect("Cannot parse the listening socket.");
+pub async fn run_proxy(target: SocketAddr, port: u32) {
+    let server_addr: SocketAddr = format!("0.0.0.0:{port}")
+        .parse()
+        .expect("Cannot parse the listening socket.");
     let client_listener = TcpListener::bind(server_addr).await.expect("Failed to bind the port");
     loop {
         let (client_socket, client_addr) = client_listener.accept().await.expect("Cannot get listen socket");
-        let server_socket = TcpStream::connect(CONFIG.target).await.expect("Cannot get send socket");
+        let server_socket = TcpStream::connect(target).await.expect("Cannot get send socket");
         let (client_reader, client_writer) = client_socket.into_split();
         let (server_reader, server_writer) = server_socket.into_split();
-        info!("{:} <-> {:} ", client_addr, CONFIG.target);
+        info!("{:} <-> {:} ", client_addr, target);
         run_stream::<client_to_server::Message>(client_reader, server_writer, "C→");
         run_stream::<server_to_client::Message>(server_reader, client_writer, "←S");
-    };
+    }
 }
 
 fn run_stream<M: BinRead + Debug + Send + 'static>(
-    reader: impl AsyncRead + Unpin + Send + 'static, 
-    writer: impl AsyncWrite + Unpin + Send + 'static, 
-    direction: &'static str
+    reader: impl AsyncRead + Unpin + Send + 'static,
+    writer: impl AsyncWrite + Unpin + Send + 'static,
+    direction: &'static str,
 ) where for<'a> <M as BinRead>::Args<'a>: Default {
     tokio::spawn(async move {
         let mut stream = FramedRead::new(reader, LengthDelimitedCodec::builder().length_field_length(2).little_endian().new_codec());

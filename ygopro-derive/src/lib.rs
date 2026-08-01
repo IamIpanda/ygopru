@@ -12,7 +12,7 @@ pub fn ygopro_message(input: TokenStream) -> TokenStream {
     message::ygopro_message(input)
 }
 
-#[proc_macro_derive(Mask, attributes(mask, mask_if))]
+#[proc_macro_derive(GameMessage, attributes(mask, mask_if, wait_for))]
 pub fn mask(input: TokenStream) -> TokenStream {
     mask::mask(input)
 }

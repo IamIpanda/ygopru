@@ -7,9 +7,9 @@ use ygopro_derive::Message;
 
 use crate::constants;
 use crate::constants::CorePlayer;
-use crate::generate_enum;
 use crate::constants::Netplayer;
 use crate::constants::PlayerChange;
+use crate::generate_enum;
 use crate::message::game_message;
 use crate::utils::string::FixedLengthString;
 use crate::utils::string::U16String;
@@ -188,6 +188,7 @@ pub struct TimeLimit {
 #[message(stoc, flag = 25)]
 #[repr(C)]
 pub struct Chat {
+    #[brw(pad_after = 1)]
     pub player: Netplayer,
     pub msg: U16String
 }
@@ -197,7 +198,6 @@ pub struct Chat {
 #[repr(C)]
 pub struct HsPlayerEnter {
     pub name: FixedLengthString<20>,
-    #[brw(pad_after = 1)]
     pub pos: Netplayer
 }
 

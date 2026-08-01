@@ -209,19 +209,17 @@ pub mod complex {
     /// Lazy-deserialized message. Holds raw `Bytes` until first access,
     /// then parses into `Message` once and caches the result via `OnceLock`.
     /// When writing, always uses the original raw bytes — never re-serializes.
+    #[derive(Debug)]
     pub struct Complex<Message> {
         pub data: Bytes,
         pub message: OnceLock<Message>,
     }
 
-    /// Each clone shares the raw bytes via `Bytes::clone` (refcount bump)
-    /// but starts with a fresh deserialization cache.
-    /// This avoids coupling the deserialization timing of clones.
-    impl<Message> Clone for Complex<Message> {
+    impl<Message> Clone for Complex<Message> where Message: Clone {
         fn clone(&self) -> Self {
             Self {
                 data: self.data.clone(),
-                message: OnceLock::new(),
+                message: self.message.clone(),
             }
         }
     }
@@ -238,6 +236,13 @@ pub mod complex {
             let mut cursor = Cursor::new(Vec::new());
             message.write_le(&mut cursor).expect("failed to serialize Complex message");
             Self::new(Bytes::from(cursor.into_inner()))
+        }
+
+        pub fn shadow_clone(&self) -> Self {
+            Self {
+                data: self.data.clone(),
+                message: OnceLock::new()
+            }
         }
 
         pub fn bytes(&self) -> &Bytes {

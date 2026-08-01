@@ -83,13 +83,13 @@ where
 pub struct Processor<Key, Req, State = crate::handler::State, Res = (), H: Call<Req, State, Res> = crate::handler::tower_handler::TowerHandler<Req, State, Res>> {
     handlers: HashMap<Key, Vec<H>>,
     global_handlers: Vec<H>,
-    _phantom: PhantomData<(Req, State, Res)>,
+    _phantom: PhantomData<fn(Req, State, Res)>,
 }
 
 impl<Key, Req, State, Res, H: Call<Req, State, Res>> Processor<Key, Req, State, Res, H>
 where
     Key: Eq + Hash,
-    State: Send + Sync,
+    State: Send,
 {
     pub fn new() -> Self {
         Self {

@@ -19,10 +19,10 @@ unsafe extern "C" {
 }
 
 unsafe impl Send for MTRandom {}
-unsafe impl Sync for MTRandom {}
 
 pub struct MTRandom {
     handle: *mut c_void,
+    seed_sequence: [u32; SEED_COUNT],
 }
 
 impl MTRandom {
@@ -39,7 +39,7 @@ impl MTRandom {
             DuelSeed::Complicated(seq) => seq,
         };
         let handle = unsafe { mtrandom_create(seed_array.as_ptr(), seed_array.len()) };
-        Self { handle }
+        Self { handle, seed_sequence: seed_array }
     }
 
     pub fn rand(&self) -> u32 {
@@ -56,6 +56,10 @@ impl MTRandom {
 
     pub fn shuffle_deck(&self, deck: &mut [u32]) {
         unsafe { mtrandom_shuffle_vector(self.handle, deck.as_mut_ptr(), deck.len()) };
+    }
+
+    pub fn seed_sequence(&self) -> &[u32; SEED_COUNT] {
+        &self.seed_sequence
     }
 }
 

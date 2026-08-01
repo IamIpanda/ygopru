@@ -19,8 +19,9 @@ pub fn mask(input: StdTokenStream) -> StdTokenStream {
     let generics = input.generics;
 
     let mut mask_statements: Vec<TokenStream> = vec![];
-    let mut towards_unconditional: Vec<TokenStream> = vec![];
-    let mut towards_conditional: Vec<TokenStream> = vec![];
+    let mut has_unconditional_mask = false;
+    let mut mask_conditions: Vec<TokenStream> = vec![];
+    let mut waiting_for_field: Option<syn::Ident> = None;
 
     match input.data {
         syn::Data::Struct(syn::DataStruct { fields: syn::Fields::Named(fields), .. }) => {
@@ -29,6 +30,11 @@ pub fn mask(input: StdTokenStream) -> StdTokenStream {
 
                 let mask_attr = field.attrs.iter().find(|attr| attr.path.is_ident("mask"));
                 let mask_if_attr = field.attrs.iter().find(|attr| attr.path.is_ident("mask_if"));
+                let wait_for_attr = field.attrs.iter().find(|attr| attr.path.is_ident("wait_for"));
+
+                if wait_for_attr.is_some() && waiting_for_field.is_none() {
+                    waiting_for_field = Some(ident.clone());
+                }
 
                 let mask_action = match mask_attr {
                     None => quote! {},
@@ -40,28 +46,23 @@ pub fn mask(input: StdTokenStream) -> StdTokenStream {
                         }
                     }
                     Some(attr) => {
-                        let mut iter = attr.tokens.clone().into_iter();
-                        match iter.next() {
-                            Some(proc_macro2::TokenTree::Punct(ref punct)) if punct.as_char() == '.' => {
-                                let rest: TokenStream = iter.collect();
-                                quote! { self.#ident . #rest; }
-                            }
-                            _ => quote! { self.#ident = #attr.tokens; },
-                        }
+                        let tokens: TokenStream = syn::parse2::<syn::Expr>(attr.tokens.clone())
+                            .map(|expr| match expr {
+                                syn::Expr::Paren(paren) => {
+                                    let expr = paren.expr;
+                                    quote! { #expr }
+                                },
+                                other => quote! { #other },
+                            })
+                            .unwrap_or_default();
+                        quote! { self.#ident = #tokens; }
                     }
                 };
-
-                let is_auto_non_primitive = mask_attr.map_or(false, |a| a.tokens.is_empty()) && !is_primitive(&field.ty);
 
                 if !mask_action.is_empty() {
                     mask_statements.push(mask_action.clone());
                     if mask_if_attr.is_none() {
-                        let towards_action = if is_auto_non_primitive {
-                            quote! { self.#ident.mask_towards(player); }
-                        } else {
-                            mask_action.clone()
-                        };
-                        towards_unconditional.push(towards_action);
+                        has_unconditional_mask = true;
                     }
                 }
 
@@ -75,16 +76,10 @@ pub fn mask(input: StdTokenStream) -> StdTokenStream {
                             other => quote! { #other },
                         })
                         .unwrap_or_default();
-                    let action = if mask_action.is_empty() {
-                        let default = quote! { self.#ident = Default::default(); };
-                        mask_statements.push(default.clone());
-                        default
-                    } else if is_auto_non_primitive {
-                        quote! { self.#ident.mask_towards(player); }
-                    } else {
-                        mask_action.clone()
-                    };
-                    towards_conditional.push(quote! { if #condition { #action } });
+                    mask_conditions.push(condition);
+                    if mask_action.is_empty() {
+                        mask_statements.push(quote! { self.#ident = Default::default(); });
+                    }
                 }
             }
         }
@@ -92,23 +87,41 @@ pub fn mask(input: StdTokenStream) -> StdTokenStream {
     };
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-    let mask_towards = if mask_statements.is_empty() {
+    let should_mask = if mask_statements.is_empty() {
         quote! {}
-    } else {
+    } else if has_unconditional_mask {
         quote! {
-            fn mask_towards(&mut self, player: CorePlayer) {
-                #(#towards_unconditional)*
-                #(#towards_conditional)*
+            fn should_mask(&self, _player: CorePlayer) -> bool {
+                true
             }
         }
+    } else if !mask_conditions.is_empty() {
+        quote! {
+            fn should_mask(&self, player: CorePlayer) -> bool {
+                #(#mask_conditions)||*
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let waiting_for = if let Some(ident) = waiting_for_field {
+        quote! {
+            fn waiting_for(&self) -> Option<CorePlayer> {
+                Some(self.#ident)
+            }
+        }
+    } else {
+        quote! {}
     };
 
     let expanded = quote! {
-        impl #impl_generics Mask for #struct_ident #ty_generics #where_clause {
+        impl #impl_generics GameMessage for #struct_ident #ty_generics #where_clause {
             fn mask(&mut self) {
                 #(#mask_statements)*
             }
-            #mask_towards
+            #should_mask
+            #waiting_for
         }
     };
 

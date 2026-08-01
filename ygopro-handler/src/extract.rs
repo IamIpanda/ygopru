@@ -65,7 +65,7 @@ macro_rules! impl_extractable {
         impl<Message, State, Res> FromRequest<Request<Message, $extra>, State, Res> for $extra
         where
             Message: Send,
-            State: Send + Sync,
+            State: Send,
             Res: Send,
         {
             fn from_request(bundle: &mut Bundle<Request<Message, $extra>, State, Res>) -> Option<Self> {
@@ -83,7 +83,7 @@ impl<Message, Extra, State, Res> FromRequest<Request<Message, Extra>, State, Res
 where
     Message: Send,
     Extra: Send,
-    State: Send + Sync,
+    State: Send,
     Res: Send,
 {
     fn from_request(bundle: &mut Bundle<Request<Message, Extra>, State, Res>) -> Option<Self> {
@@ -96,7 +96,7 @@ macro_rules! impl_variant_ref {
         impl<Extra, State, Res> FromRequest<Request<$message_mod::Message, Extra>, State, Res> for &$message_mod::$variant
         where
             Extra: Send,
-            State: Send + Sync,
+            State: Send,
             Res: Send,
         {
             fn from_request(bundle: &mut Bundle<Request<$message_mod::Message, Extra>, State, Res>) -> Option<Self> {
@@ -110,7 +110,7 @@ macro_rules! impl_variant_ref {
 
         impl<State, Res> FromRequest<$message_mod::Message, State, Res> for &$message_mod::$variant
         where
-            State: Send + Sync,
+            State: Send,
             Res: Send,
         {
             fn from_request(bundle: &mut Bundle<$message_mod::Message, State, Res>) -> Option<Self> {
@@ -129,7 +129,7 @@ macro_rules! impl_variant_complex_ref {
         impl<Extra, State, Res> FromRequest<Request<Complex<$message_mod::Message>, Extra>, State, Res> for &$message_mod::$variant
         where
             Extra: Send,
-            State: Send + Sync,
+            State: Send,
             Res: Send,
         {
             fn from_request(bundle: &mut Bundle<Request<Complex<$message_mod::Message>, Extra>, State, Res>) -> Option<Self> {
@@ -143,7 +143,7 @@ macro_rules! impl_variant_complex_ref {
 
         impl<State, Res> FromRequest<Complex<$message_mod::Message>, State, Res> for &$message_mod::$variant
         where
-            State: Send + Sync,
+            State: Send,
             Res: Send,
         {
             fn from_request(bundle: &mut Bundle<Complex<$message_mod::Message>, State, Res>) -> Option<Self> {

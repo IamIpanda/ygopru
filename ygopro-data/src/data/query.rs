@@ -9,11 +9,10 @@ use binrw::VecArgs;
 
 use crate::constants::*;
 use crate::message::game_message::CardCode;
-use crate::message::game_message::Mask;
-use ygopro_derive::Mask;
+use crate::message::game_message::GameMessage;
+use ygopro_derive::GameMessage;
 
-
-#[derive(BinRead, BinWrite, Clone, Debug, Mask)]
+#[derive(BinRead, BinWrite, Clone, Debug, GameMessage)]
 pub struct CardPosition<const CODE: bool, const SUB_SEQUENCE: bool, const DESCRIPTION: bool> {
     #[brw(if(CODE))]
     #[mask]
@@ -28,11 +27,35 @@ pub struct CardPosition<const CODE: bool, const SUB_SEQUENCE: bool, const DESCRI
     pub description: i32
 }
 
+// In ygopro, these fields are packed as a u32.
+// We don't need pack them.
+#[derive(BinRead, BinWrite, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct InfoLocation {
+    pub controller: CorePlayer,
+    pub location: Location,
+    pub sequence: u8,
+    #[br(if(!location.contains(Location::Overlay), Position::Any))]
+    #[bw(if(!location.contains(Location::Overlay)))]
+    pub position: Position,
+    #[brw(if(location.contains(Location::Overlay)))]
+    pub overlay_sequence: u8
+}
+
+impl InfoLocation {
+    pub fn should_mask(&self) -> bool {
+        if self.location.contains(Location::Hand) {
+            !self.position.intersects(Position::Faceup)
+        } else {
+            self.position.intersects(Position::Facedown)
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum QueryData {
     Clear,
     Code(i32),
-    Position(Position),
+    Position(InfoLocation),
     Alias(i32),
     Type(Type),
     Level(i32),
@@ -46,14 +69,14 @@ pub enum QueryData {
     Reason(Reason),
     ReasonCard(i32),
     EquipCard(CardPosition<false, true, false>),
-    TargetCard(CardPosition<false, true, false>),
-    OverlayCard(Vec<i32>), // todo: fix
-    Counters(Vec<(i16, i16)>), // todo: fix,
+    TargetCard(Vec<CardPosition<false, true, false>>),
+    OverlayCard(Vec<u32>),
+    Counters(Vec<(u16, u16)>),
     Owner(CorePlayer),
     Status(Status),
     LeftScale(i32),
     RightScale(i32),
-    Link(i32)
+    Link(i32, Linkmarkers)
 }
 
 pub(crate) struct QueryDatas(Vec<QueryData>);
@@ -67,8 +90,7 @@ impl BinRead for QueryDatas {
         if query.is_empty() { query_datas.push(QueryData::Clear); }
         if query.contains(Query::Code) { query_datas.push(QueryData::Code(i32::read_options(reader, endian, ())?)); }
         if query.contains(Query::Position) { 
-            query_datas.push(QueryData::Position(Position::read_options(reader, endian, ())?));
-            reader.read_le::<[u8; 3]>()?; // padding 3 bytes
+            query_datas.push(QueryData::Position(InfoLocation::read_options(reader, endian, ())?));
         }
         if query.contains(Query::Alias)       { query_datas.push(QueryData::Alias(i32::read_options(reader,           endian, ())?)); }
         if query.contains(Query::Type)        { query_datas.push(QueryData::Type(Type::read_options(reader,           endian, ())?)); }
@@ -83,14 +105,17 @@ impl BinRead for QueryDatas {
         if query.contains(Query::Reason)      { query_datas.push(QueryData::Reason(Reason::read_options(reader,       endian, ())?)); }
         if query.contains(Query::ReasonCard)  { query_datas.push(QueryData::ReasonCard(i32::read_options(reader,      endian, ())?)); }
         if query.contains(Query::EquipCard)   { query_datas.push(QueryData::EquipCard(CardPosition::<false,true,false>::read_options(reader, endian, ())?)); }
-        if query.contains(Query::TargetCard)  { query_datas.push(QueryData::TargetCard(CardPosition::<false,true,false>::read_options(reader, endian, ())?)); }
+        if query.contains(Query::TargetCard) {
+            let count = u32::read_options(reader, endian, ())? as usize;
+            query_datas.push(QueryData::TargetCard(Vec::<CardPosition<false, true, false>>::read_options(reader, endian, VecArgs { count, inner: () })?));
+        }
         if query.contains(Query::OverlayCard) {
             let count = u32::read_options(reader, endian, ())? as usize;
-            query_datas.push(QueryData::OverlayCard(Vec::<i32>::read_options(reader, endian, VecArgs { count, inner: () })?)); 
+            query_datas.push(QueryData::OverlayCard(Vec::<u32>::read_options(reader, endian, VecArgs { count, inner: () })?)); 
         }
         if query.contains(Query::Counters) { 
             let count = u32::read_options(reader, endian, ())? as usize;
-            query_datas.push(QueryData::Counters(Vec::<(i16, i16)>::read_options(reader, endian, VecArgs { count, inner: () })?)); 
+            query_datas.push(QueryData::Counters(Vec::<(u16, u16)>::read_options(reader, endian, VecArgs { count, inner: () })?)); 
         }
         if query.contains(Query::Owner) { 
             query_datas.push(QueryData::Owner(CorePlayer::read_options(reader, endian, ())?)); 
@@ -99,7 +124,7 @@ impl BinRead for QueryDatas {
         if query.contains(Query::Status)     { query_datas.push(QueryData::Status(Status::read_options(reader,  endian, ())?)); }
         if query.contains(Query::LeftScale)  { query_datas.push(QueryData::LeftScale(i32::read_options(reader,  endian, ())?)); }
         if query.contains(Query::RightScale) { query_datas.push(QueryData::RightScale(i32::read_options(reader, endian, ())?)); }
-        if query.contains(Query::Link)       { query_datas.push(QueryData::Link(i32::read_options(reader,       endian, ())?)); }
+        if query.contains(Query::Link)       { query_datas.push(QueryData::Link(i32::read_options(reader, endian, ())?, Linkmarkers::read_options(reader, endian, ())?)); }
         Ok(QueryDatas(query_datas))
     }
 }
@@ -130,7 +155,7 @@ impl<'a> From<&'a QueryData> for Query {
             QueryData::Status(_)      => Query::Status,
             QueryData::LeftScale(_)   => Query::LeftScale,
             QueryData::RightScale(_)  => Query::RightScale,
-            QueryData::Link(_)        => Query::Link,
+            QueryData::Link(_, _)        => Query::Link,
         }
     }
 }
@@ -139,6 +164,25 @@ impl<'a> From<&'a QueryData> for Query {
 pub enum UpdateCardInfo {
     Empty,
     Data(Vec<QueryData>)
+}
+
+impl GameMessage for UpdateCardInfo {
+    fn mask(&mut self) {
+        if !self.should_mask(CorePlayer::None) { return }
+        if let UpdateCardInfo::Data(data) = self {
+            data.fill(QueryData::Clear);
+        }
+    }
+
+    fn should_mask(&self, _player: CorePlayer) -> bool {
+        let data = match self {
+            UpdateCardInfo::Data(data) => data,
+            _ => return false
+        };
+        data.iter().find_map(|q| if let QueryData::Position(p) = q { 
+            Some(p.should_mask()) 
+        } else { None }).unwrap_or(false)
+    }
 }
 
 impl BinRead for UpdateCardInfo {
@@ -172,10 +216,7 @@ impl BinWrite for UpdateCardInfo {
             match query {
                 QueryData::Clear                => (),
                 QueryData::Code(code)           => code.write_options(writer,     endian, args)?,
-                QueryData::Position(position)   => {
-                    position.write_options(writer, endian, args)?;
-                    [0u8; 3].write_options(writer, endian, args)?;
-                },
+                QueryData::Position(info_location)   => info_location.write_options(writer, endian, args)?,
                 QueryData::Alias(alias)         => alias.write_options(writer, endian, args)?,
                 QueryData::Type(_type)          => _type.write_options(writer, endian, args)?,
                 QueryData::Level(level)         => level.write_options(writer, endian, args)?,
@@ -189,7 +230,11 @@ impl BinWrite for UpdateCardInfo {
                 QueryData::Reason(reason)       => reason.write_options(writer, endian, args)?,
                 QueryData::ReasonCard(card)     => card.write_options(writer, endian, args)?,
                 QueryData::EquipCard(card)      => card.write_options(writer, endian, args)?,
-                QueryData::TargetCard(card)     => card.write_options(writer, endian, args)?,
+                QueryData::TargetCard(cards)    => {
+                    let len = cards.len() as u32;
+                    len.write_options(writer, endian, args)?;
+                    cards.write_options(writer, endian, args)?;
+                },
                 QueryData::OverlayCard(cards)   => {
                     let len = cards.len() as u32;
                     len.write_options(writer, endian, args)?;
@@ -207,7 +252,10 @@ impl BinWrite for UpdateCardInfo {
                 QueryData::Status(status)       => status.write_options(writer, endian, args)?,
                 QueryData::LeftScale(scale)     => scale.write_options(writer, endian, args)?,
                 QueryData::RightScale(scale)    => scale.write_options(writer, endian, args)?,
-                QueryData::Link(link)           => link.write_options(writer, endian, args)?,
+                QueryData::Link(link, linkmarkers) => {
+                    link.write_options(writer, endian, args)?;
+                    linkmarkers.write_options(writer, endian, args)?
+                },
             }
         }
         let current_pos = writer.stream_position()?;
@@ -229,12 +277,12 @@ mod test {
     #[test]
     fn test_deserialize_query() {
         let arr = vec![16, 0, 0, 0, 3, 0, 0, 0, 122, 178, 159, 1, 1, 2, 0, 10, 16, 0, 0, 0, 3, 0, 0, 0, 17, 231, 97, 3, 1, 2, 1, 10, 16, 0, 0, 0, 3, 0, 0, 0, 59, 73, 201, 5, 1, 2, 2, 10, 16, 0, 0, 0, 3, 0, 0, 0, 239, 39, 81, 0, 1, 2, 3, 10, 16, 0, 0, 0, 3, 0, 0, 0, 143, 77, 182, 3, 1, 2, 4, 1];
-        let _re: Vec<u8> = vec![16, 0, 0, 0, 3, 0, 0, 0, 122, 178, 159, 1, 1, 0, 0, 0,  16, 0, 0, 0, 3, 0, 0, 0, 17, 231, 97, 3, 1, 0, 0, 0,  16, 0, 0, 0, 3, 0, 0, 0, 59, 73, 201, 5, 1, 0, 0, 0,  16, 0, 0, 0, 3, 0, 0, 0, 239, 39, 81, 0, 1, 0, 0, 0,  16, 0, 0, 0, 3, 0, 0, 0, 143, 77, 182, 3, 1, 0, 0, 0];
+        let re: Vec<u8> = vec![16, 0, 0, 0, 3, 0, 0, 0, 122, 178, 159, 1, 1, 2, 0, 10, 16, 0, 0, 0, 3, 0, 0, 0, 17, 231, 97, 3, 1, 2, 1, 10, 16, 0, 0, 0, 3, 0, 0, 0, 59, 73, 201, 5, 1, 2, 2, 10, 16, 0, 0, 0, 3, 0, 0, 0, 239, 39, 81, 0, 1, 2, 3, 10, 16, 0, 0, 0, 3, 0, 0, 0, 143, 77, 182, 3, 1, 2, 4, 1];
         let mut reader = Cursor::new(arr);
         let replay = Vec::<UpdateCardInfo>::read_le_args(&mut reader, VecArgs {count: 5, inner: {}}).unwrap();
-        println!("{:?}", replay);
         let mut writer = Cursor::new(Vec::new());
         replay.write_le(&mut writer).unwrap();
-        println!("{:?}", writer.into_inner());
+        let result = writer.into_inner();
+        assert_eq!(result, re, "round-trip mismatch");
     }
 }

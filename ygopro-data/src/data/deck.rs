@@ -109,16 +109,34 @@ impl Eq for Deck {}
 #[binrw]
 #[derive(PartialEq, Eq, Debug, Clone, Default)]
 pub struct ReplayDeck {
-    #[bw(calc = main.len() as u32 + extra.len() as u32)]
+    #[bw(calc = main.len() as u32)]
     main_size: u32,
     #[br(count = main_size)]
     pub main: Vec<u32>,
-    #[bw(calc = side.len() as u32)]
-    side_size: u32,
-    #[br(count = side_size)]
-    pub side: Vec<u32>,
-    #[br(ignore)]
+    #[bw(calc = extra.len() as u32)]
+    extra_size: u32,
+    #[br(count = extra_size)]
     pub extra: Vec<u32>,
+}
+
+impl From<Deck> for ReplayDeck {
+    fn from(value: Deck) -> Self {
+        let mut main = value.main;
+        let mut extra = value.extra;
+        main.reverse();
+        extra.reverse();
+        Self { main, extra }
+    }
+}
+
+impl From<&Deck> for ReplayDeck {
+    fn from(value: &Deck) -> Self {
+        let mut main = value.main.clone();
+        let mut extra = value.extra.clone();
+        main.reverse();
+        extra.reverse();
+        Self { main, extra }
+    }
 }
 
 #[derive(Specifier, Clone, Copy, Debug, IntoPrimitive, TryFromPrimitive, PartialEq, Eq)]

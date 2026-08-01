@@ -1,1 +1,7 @@
 /target
+.history
+.vscode
+*.cdb
+*.conf
+script
+TODO*

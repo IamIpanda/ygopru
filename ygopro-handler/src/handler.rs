@@ -22,7 +22,7 @@ pub trait IntoResponse<Res> {
     fn into_response(self) -> Res;
 }
 
-impl<T: Send + Sync> IntoResponse<T> for T {
+impl<T: Send> IntoResponse<T> for T {
     fn into_response(self) -> T {
         self
     }
@@ -31,7 +31,7 @@ impl<T: Send + Sync> IntoResponse<T> for T {
 pub trait FromRequest<Req, State, Res>: Sized
 where
     Req: Send,
-    State: Send + Sync,
+    State: Send,
     Res: Send,
 {
     fn from_request(bundle: &mut Bundle<Req, State, Res>) -> Option<Self>;
@@ -46,7 +46,7 @@ pub struct Bundle<Req, State = crate::handler::State, Res = ()> {
 
 pub trait Handler<T, Req, State, Res>: Clone + Send + Sync + Sized + 'static
 where
-    State: Send + Sync,
+    State: Send,
 {
     type Future: Future<Output = Option<Res>> + Send;
 
@@ -59,7 +59,7 @@ where
     Fut: Future<Output = Output> + Send + 'static,
     Output: IntoResponse<Res> + 'static,
     Req: Send + 'static,
-    State: Send + Sync + 'static,
+    State: Send + 'static,
     Res: Send + 'static,
 {
     type Future = Pin<Box<dyn Future<Output = Option<Res>> + Send>>;
@@ -75,7 +75,7 @@ where
     F: Fn() -> Output + Clone + Send + Sync + 'static,
     Output: IntoResponse<Res> + 'static,
     Req: Send,
-    State: Send + Sync,
+    State: Send,
     Res: Send,
 {
     type Future = std::future::Ready<Option<Res>>;
@@ -94,7 +94,7 @@ macro_rules! impl_handler {
             Fut: Future<Output = Output> + Send + 'static,
             Output: IntoResponse<Res> + 'static,
             Req: Send + 'static,
-            State: Send + Sync + 'static,
+            State: Send + 'static,
             Res: Send + 'static,
             $( $ty: FromRequest<Req, State, Res> + Send + 'static, )*
             $last: FromRequest<Req, State, Res> + Send + 'static,
@@ -128,7 +128,7 @@ macro_rules! impl_handler {
             F: Fn($($ty,)* $last,) -> Output + Clone + Send + Sync + 'static,
             Output: IntoResponse<Res> + 'static,
             Req: Send,
-            State: Send + Sync,
+            State: Send,
             Res: Send,
             $( $ty: FromRequest<Req, State, Res> + Send, )*
             $last: FromRequest<Req, State, Res> + Send,
@@ -215,7 +215,7 @@ pub mod tower_handler {
     where
         H: Handler<T, Req, State, Res> + Clone,
         Req: Send + 'static,
-        State: Send + Sync + 'static,
+        State: Send + 'static,
         Res: Send + 'static,
     {
         type Response = Bundle<Req, State, Res>;
@@ -274,7 +274,7 @@ pub mod tower_handler {
     impl<Req, State, Res> TowerHandler<Req, State, Res>
     where
         Req: Send + 'static,
-        State: Send + Sync + 'static,
+        State: Send + 'static,
         Res: Send + 'static,
     {
         pub fn new<T: 'static>(
@@ -296,7 +296,7 @@ pub mod tower_handler {
     impl<Req, State, Res> Service<Bundle<Req, State, Res>> for TowerHandler<Req, State, Res>
     where
         Req: Send + 'static,
-        State: Send + Sync + 'static,
+        State: Send + 'static,
         Res: Send + 'static,
     {
         type Response = Bundle<Req, State, Res>;
@@ -326,7 +326,7 @@ pub mod tower_handler {
     impl<Req, State, Res> Call<Req, State, Res> for TowerHandler<Req, State, Res>
     where
         Req: Send + 'static,
-        State: Send + Sync + 'static,
+        State: Send + 'static,
         Res: Send + 'static,
     {
         fn call(&self, bundle: Bundle<Req, State, Res>) -> Pin<Box<dyn Future<Output = Bundle<Req, State, Res>> + Send>> {
@@ -375,7 +375,7 @@ pub mod async_handler {
         <H as Handler<T, Req, State, Res>>::Future: 'static,
         T: 'static,
         Req: Send + 'static,
-        State: Send + Sync + 'static,
+        State: Send + 'static,
         Res: Send + 'static,
     {
         fn call(&self, bundle: Bundle<Req, State, Res>) -> Pin<Box<dyn Future<Output = Bundle<Req, State, Res>> + Send>> {
@@ -413,7 +413,7 @@ pub mod async_handler {
     impl<Req, State, Res> AsyncHandler<Req, State, Res>
     where
         Req: Send + 'static,
-        State: Send + Sync + 'static,
+        State: Send + 'static,
         Res: Send + 'static,
     {
         pub fn new<T: 'static, H: Handler<T, Req, State, Res>>(
@@ -441,7 +441,7 @@ pub mod async_handler {
     impl<Req, State, Res> Call<Req, State, Res> for AsyncHandler<Req, State, Res>
     where
         Req: Send + 'static,
-        State: Send + Sync + 'static,
+        State: Send + 'static,
         Res: Send + 'static,
     {
         fn call(&self, bundle: Bundle<Req, State, Res>) -> Pin<Box<dyn Future<Output = Bundle<Req, State, Res>> + Send>> {
@@ -485,7 +485,7 @@ pub mod sync_handler {
     impl<Req, State, Res> SyncHandler<Req, State, Res>
     where
         Req: Send,
-        State: Send + Sync,
+        State: Send,
         Res: Send,
     {
         pub fn new<T, H: Handler<T, Req, State, Res, Future = std::future::Ready<Option<Res>>>>(
@@ -502,7 +502,7 @@ pub mod sync_handler {
             ) -> Option<Res>
             where
                 H: Handler<T, Req, State, Res, Future = std::future::Ready<Option<Res>>>,
-                State: Send + Sync,
+                State: Send,
             {
                 let handler = unsafe { &*(pointer as *const H) };
                 handler.call(bundle).into_inner()
@@ -552,7 +552,7 @@ pub mod sync_handler {
     impl<Req, State, Res> Call<Req, State, Res> for SyncHandler<Req, State, Res>
     where
         Req: Send,
-        State: Send + Sync,
+        State: Send,
         Res: Send,
     {
         fn call(&self, bundle: Bundle<Req, State, Res>) -> Pin<Box<dyn Future<Output = Bundle<Req, State, Res>> + Send>> {

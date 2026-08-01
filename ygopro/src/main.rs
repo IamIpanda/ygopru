@@ -1,13 +1,16 @@
 use std::io::Cursor;
+use std::ops::Deref;
+use std::sync::OnceLock;
 
+use base64::Engine;
 use binrw::BinRead;
-use binrw::BinWrite;
 use futures::SinkExt;
 use tokio::net::TcpListener;
 use tokio_stream::StreamExt;
 use tokio_util::codec::LengthDelimitedCodec;
 
 use ygopro::single_duel::SingleDuelHost;
+use ygopro_core_wrapper::DuelSeed;
 use ygopro_data::constants::Mode;
 use ygopro_data::constants::MasterRule;
 use ygopro_data::constants::Rule;
@@ -15,6 +18,28 @@ use ygopro_data::data::ReplayMode;
 use ygopro_data::message::ctos;
 use ygopro_data::message::HostInfo;
 use ygopro_handler::RoomProvider;
+
+/// Seeds decoded from command line args[13..], indexed by duel count.
+/// Mirrors pre_seed[duel_count] in ../ygopro/gframe/single_duel.cpp:548.
+static PRE_SEEDS: OnceLock<Vec<[u32; ygopro_core_wrapper::random::SEED_COUNT]>> = OnceLock::new();
+
+/// Decode one base64 seed blob into the seed sequence, mirrors Base64::Decode in ../ygopro/gframe/gframe.cpp:112.
+fn decode_seed(seed_arg: &str) -> [u32; ygopro_core_wrapper::random::SEED_COUNT] {
+    let bytes = base64::engine::general_purpose::STANDARD.decode(seed_arg).unwrap();
+    let mut seed = [0u32; ygopro_core_wrapper::random::SEED_COUNT];
+    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
+        seed[index] = u32::from_le_bytes(chunk.try_into().unwrap());
+    }
+    seed
+}
+
+/// Provide the pre-seeded sequence for the given duel, or random if not specified.
+fn seed_generator(duel_count: u8) -> DuelSeed {
+    match PRE_SEEDS.get().and_then(|seeds| seeds.get(duel_count as usize)).copied() {
+        Some(seed) => DuelSeed::Complicated(seed),
+        None => DuelSeed::None,
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -63,7 +88,8 @@ fn parse_args() -> (u16, HostInfo, ReplayMode) {
         time_limit: args[11].parse().unwrap_or(180),
     };
     let replay_mode = ReplayMode::from_bits_retain(args[12].parse::<u32>().unwrap_or(0));
-    // TODO: decode base 64 seeds
+    let pre_seeds = args.iter().skip(13).map(|seed_arg| decode_seed(seed_arg)).collect();
+    PRE_SEEDS.set(pre_seeds).ok();
     (port, hostinfo, replay_mode)
 }
 
@@ -72,7 +98,14 @@ async fn start_server(port: u16, hostinfo: HostInfo, replay_mode: ReplayMode) {
     let port = listener.local_addr().unwrap().port();
     println!("{port}");
     log::info!("listening on port {port}");
-    let (mut duel, handle) = SingleDuelHost::new(hostinfo.mode == Mode::Match, None);
+    let configuration = ygopro::single_duel::Configuration { 
+        no_init_shuffle_deck: false, 
+        allow_join_after_start: true, 
+        seed_generator: Some(seed_generator), 
+        override_best_of: 0,
+        replay_mode
+    };
+    let (mut duel, handle) = SingleDuelHost::new(hostinfo, configuration);
 
     tokio::spawn(async move {
         loop {
@@ -91,7 +124,7 @@ async fn start_server(port: u16, hostinfo: HostInfo, replay_mode: ReplayMode) {
                 Ok(frame) => {
                     let mut cursor = Cursor::new(&frame);
                     ctos::Message::read_le(&mut cursor).ok().inspect(|message| {
-                        log::debug!("CTOS: {message:?}");
+                        log::trace!("CTOS: {message:?}");
                     })
                 }
                 Err(_) => None,
@@ -101,11 +134,8 @@ async fn start_server(port: u16, hostinfo: HostInfo, replay_mode: ReplayMode) {
 
             tokio::spawn(async move {
                 while let Some(message) = stoc_stream.next().await {
-                    log::debug!("STOC: {message:?}");
-                    let mut buffer = Cursor::new(Vec::new());
-                    if message.write_le(&mut buffer).is_ok() {
-                        framed_write.send(buffer.into_inner().into()).await.ok();
-                    }
+                    log::trace!("STOC: {:?}", message.deref());
+                    framed_write.send(message.data).await.ok();
                 }
             });
         }

@@ -1,0 +1,24 @@
+[package]
+name = "ygopro-toolkits"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "ygopro-toolkits"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+tokio-stream = "0.1"
+binrw = "0.13"
+futures = "0.3"
+log = "0.4"
+pretty_env_logger = "0.5"
+
+ygopro-data = { path = "../ygopro-data" }
+ygopro = { path = "../ygopro" }
+ygopro-core-wrapper = { path = "../ygopro-core-wrapper" }
+ygopro-handler = { path = "../ygopro-handler" }
+

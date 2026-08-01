@@ -14,3 +14,11 @@ ygopro-handler本质上是对ygopro和srvpro的抽象层。你应该谨慎。
 ---
 Replay应该是RoundTrip的。
 Request应该是RoundTrip的。
+---
+Replay修一下。（已完成）
+Mask修一下。（已完成）
+我不想做TagDuel，该动手做Srvpro了。
+回头看，Handler里Player和Room的意义几乎没有，SingleDuel自己实现了一遍，我应该重新考虑。
+---
+single_duel的room instance何时断开？听起来是个option。
+ctos::response是一个可以语义化的东西。

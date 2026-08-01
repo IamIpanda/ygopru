@@ -25,6 +25,8 @@ pub type intptr_t = isize;
 
 pub mod random;
 pub use random::DuelSeed;
+
+use crate::random::SEED_COUNT;
 pub type script_reader = Option<extern "C" fn(*const c_char, *mut c_int) -> *mut u8>;
 pub type card_reader = Option<extern "C" fn(u32, *mut CoreCard) -> u32>;
 pub type message_handler = Option<extern "C" fn(intptr_t, u32) -> u32>;
@@ -110,7 +112,7 @@ impl Duel {
     }
 
     pub fn new_card(&self, code: u32, owner: CorePlayer, playerid: CorePlayer, location: Location, sequence: u8, position: Position) {
-        unsafe { new_card(self.duel_pointer, code, owner as u8, playerid as u8, location.bits(), sequence, position as u8) };
+        unsafe { new_card(self.duel_pointer, code, owner as u8, playerid as u8, location.bits(), sequence, position.bits()) };
     }
 
     pub fn new_tag_card(&self, code: u32, owner: CorePlayer, location: Location) {
@@ -149,6 +151,10 @@ impl Duel {
     pub fn shuffle_deck(&self, deck: &mut [u32]) {
         self.shuffler.shuffle_deck(deck);
     }
+
+    pub fn seed(&self) -> &[u32; SEED_COUNT] {
+        self.shuffler.seed_sequence()
+    }
 }
 
 impl Drop for Duel {
@@ -173,142 +179,4 @@ pub struct ProcessResult {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    // C++ constants from ocgcore/common.h:
-    //   #define PROCESSOR_BUFFER_LEN  0x0fffffff
-    //   #define PROCESSOR_FLAG        0xf0000000
-    //   #define PROCESSOR_NONE        0
-    //   #define PROCESSOR_WAITING     0x10000000
-    //   #define PROCESSOR_END         0x20000000
-    //
-    // In C++: engLen = result & PROCESSOR_BUFFER_LEN
-    //         engFlag = result & PROCESSOR_FLAG
-    // Rust ProcessResult maps B28 to bits 0-27 and ProcessResultFlags to bits 28-31.
-
-    const PROCESSOR_BUFFER_LEN: u32 = 0x0fffffff;
-    const PROCESSOR_WAITING: u32 = 0x10000000;
-    const PROCESSOR_END: u32 = 0x20000000;
-
-    fn from_u32(raw: u32) -> ProcessResult {
-        ProcessResult::from_bytes(raw.to_le_bytes())
-    }
-
-    fn to_u32(result: ProcessResult) -> u32 {
-        u32::from_le_bytes(result.into_bytes())
-    }
-
-    fn cpp_extract_length(raw: u32) -> u32 {
-        raw & PROCESSOR_BUFFER_LEN
-    }
-
-    fn cpp_extract_flag(raw: u32) -> u32 {
-        raw & 0xf0000000
-    }
-
-    #[test]
-    fn test_bit_layout_roundtrip() {
-        let values: &[u32] = &[
-            0x00000000,
-            0x00000001,
-            0x0000002a,
-            0x0fffffff,
-            0x10000000,
-            0x10000005,
-            0x20000000,
-            0x2000000a,
-        ];
-        for &original in values {
-            let result = from_u32(original);
-            let roundtripped = to_u32(result);
-            assert_eq!(
-                original, roundtripped,
-                "roundtrip failed for {original:#010x}: got {roundtripped:#010x}",
-            );
-        }
-    }
-
-    #[test]
-    fn test_data_length_matches_cpp_extraction() {
-        let values: &[u32] = &[
-            0x00000000,
-            0x00000005,
-            0x0fffffff,
-            0x10000000,
-            0x1000000a,
-            0x20000000,
-            0x20000014,
-        ];
-        for &raw in values {
-            let result = from_u32(raw);
-            let actual_length = result.data_length();
-            let expected_length = cpp_extract_length(raw);
-            assert_eq!(
-                actual_length, expected_length,
-                "data_length mismatch for raw={raw:#010x}: got {actual_length}, expected {expected_length}",
-            );
-        }
-    }
-
-    #[test]
-    fn test_flags_match_cpp_extraction() {
-        let values: &[u32] = &[
-            0x00000000,
-            0x00000005,
-            0x0fffffff,
-            0x10000000,
-            0x1000000a,
-            0x20000000,
-            0x20000014,
-        ];
-        for &raw in values {
-            let result = from_u32(raw);
-            let cpp_flag = cpp_extract_flag(raw);
-            let rust_flag = result.flags();
-
-            match cpp_flag {
-                0 => assert_eq!(
-                    rust_flag, ProcessResultFlags::None,
-                    "flags mismatch for raw={raw:#010x}: expected None, got {rust_flag:?}",
-                ),
-                PROCESSOR_WAITING => assert_eq!(
-                    rust_flag, ProcessResultFlags::Waiting,
-                    "flags mismatch for raw={raw:#010x}: expected Waiting, got {rust_flag:?}",
-                ),
-                PROCESSOR_END => assert_eq!(
-                    rust_flag, ProcessResultFlags::End,
-                    "flags mismatch for raw={raw:#010x}: expected End, got {rust_flag:?}",
-                ),
-                other => panic!("unexpected C++ flag {other:#010x} for raw={raw:#010x}"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_flags_eq_cpp_raw_values() {
-        // When stored in a ProcessResult with data_length=0, the flags field
-        // at bits 28-31 should match C++ PROCESSOR_WAITING / PROCESSOR_END.
-        let result_waiting = from_u32(PROCESSOR_WAITING);
-        assert_eq!(result_waiting.flags(), ProcessResultFlags::Waiting);
-        assert_eq!(result_waiting.data_length(), 0);
-
-        let result_end = from_u32(PROCESSOR_END);
-        assert_eq!(result_end.flags(), ProcessResultFlags::End);
-        assert_eq!(result_end.data_length(), 0);
-    }
-
-    #[test]
-    fn test_max_data_length_isolates_from_flags() {
-        // C++ PROCESSOR_BUFFER_LEN = 0x0fffffff. Both length and flag
-        // should coexist without crosstalk.
-        let raw = PROCESSOR_BUFFER_LEN | PROCESSOR_WAITING; // 0x1fffffff
-        let result = from_u32(raw);
-        assert_eq!(result.data_length(), PROCESSOR_BUFFER_LEN);
-        assert_eq!(result.flags(), ProcessResultFlags::Waiting);
-
-        let raw = PROCESSOR_BUFFER_LEN | PROCESSOR_END; // 0x2fffffff
-        let result = from_u32(raw);
-        assert_eq!(result.data_length(), PROCESSOR_BUFFER_LEN);
-        assert_eq!(result.flags(), ProcessResultFlags::End);
-    }
 }

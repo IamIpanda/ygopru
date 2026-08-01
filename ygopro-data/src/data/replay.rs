@@ -20,13 +20,14 @@ use crate::data::ReplayDeck;
 
 const SIZE_REPLAY_SEED: usize = 8;
 
-enum ReplayVersion {
+#[repr(u32)]
+pub enum ReplayVersion {
     V1 = 0x31707279,
     V2 = 0x32707279
 }
 
 bitflags! {
-    #[derive(BinRead, BinWrite, Clone, Debug)]
+    #[derive(BinRead, BinWrite, Clone, Debug, PartialEq, Eq)]
     #[br(map=|x: u32| Self::from_bits_retain(x))]
     #[bw(map=|x: &Self| x.bits())]
     pub struct ReplayHeaderFlags: u32 {
@@ -100,13 +101,13 @@ impl ReplayHeader {
 #[bw(import(header: &ReplayHeader))]
 pub struct ReplayBody {
     pub host_name: FixedLengthString<20>,
+    pub client_name: FixedLengthString<20>,
     #[br(if(header.is_tag()))]
     #[bw(if(header.is_tag()))]
     pub tag_host_name: Option<FixedLengthString<20>>,
     #[br(if(header.is_tag()))]
     #[bw(if(header.is_tag()))]
     pub tag_client_name: Option<FixedLengthString<20>>,
-    pub client_name: FixedLengthString<20>,
     pub start_lp: u32,
     pub start_hand: u32,
     pub draw_count: u32,
@@ -114,13 +115,13 @@ pub struct ReplayBody {
     pub duel_options: DuelOptions,
     pub duel_rule: u16,
     pub host_deck: ReplayDeck,
+    pub client_deck: ReplayDeck,
     #[br(if(header.is_tag()))]
     #[bw(if(header.is_tag()))]
     pub tag_host_deck: Option<ReplayDeck>,
     #[br(if(header.is_tag()))]
     #[bw(if(header.is_tag()))]
     pub tag_client_deck: Option<ReplayDeck>,
-    pub client_deck: ReplayDeck,
     #[br(parse_with=until_eof)]
     pub datas: Vec<ReplayData>
 }
@@ -143,6 +144,27 @@ pub struct Replay {
 }
 
 impl Replay {
+    pub fn fill_data_size(&mut self) {
+        let host = &self.body.host_deck;
+        let client = &self.body.client_deck;
+        let mut size = 40 + 40
+            + 4 + 4 + 4 + 2 + 2
+            + 4 + host.main.len() as u32 * 4 + 4 + host.extra.len() as u32 * 4
+            + 4 + client.main.len() as u32 * 4 + 4 + client.extra.len() as u32 * 4
+            + self.body.datas.iter().map(|d| 1 + d.data.len() as u32).sum::<u32>();
+            
+        if self.header.is_tag() {
+            size += 40 + 40;
+            if let Some(ref tag_host) = self.body.tag_host_deck {
+                size += 4 + tag_host.main.len() as u32 * 4 + 4 + tag_host.extra.len() as u32 * 4;
+            }
+            if let Some(ref tag_client) = self.body.tag_client_deck {
+                size += 4 + tag_client.main.len() as u32 * 4 + 4 + tag_client.extra.len() as u32 * 4;
+            }
+        }
+        self.header.data_size = size;
+    }
+
     pub fn duel_rule(&self) -> crate::constants::MasterRule { 
         if self.duel_options.contains(DuelOptions::ObsoleteRuling) { crate::constants::MasterRule::MasterRule1 }
         else { crate::constants::MasterRule::try_from(self.duel_rule as u8).unwrap_or(crate::constants::MasterRule::MasterRule1) }
@@ -248,19 +270,61 @@ mod test {
     #[test]
     fn test_replay_roundtrip() {
         use binrw::BinWrite;
+        use crate::data::ReplayHeader;
+        use crate::data::ReplayHeaderFlags;
+        use crate::data::ReplayVersion;
+        use crate::data::ReplayBody;
+        use crate::data::ReplayDeck;
+        use crate::data::ReplayData;
+        use crate::data::DuelOptions;
+        use crate::utils::string::FixedLengthString;
 
-        let raw = std::fs::read("/Users/iami/Downloads/极羽光_vs_爱尔琳妮_20260531225205_G1.yrp").unwrap();
-        let replay = Replay::read_le(&mut Cursor::new(&raw)).unwrap();
+        let mut original = Replay {
+            header: ReplayHeader {
+                id: ReplayVersion::V2 as u32,
+                version: 0x1362,
+                flag: ReplayHeaderFlags::Uniform | ReplayHeaderFlags::Compressed,
+                seed: 0,
+                data_size: 0,
+                start_time: 1234567890,
+                props: [93, 0, 0, 128, 0, 0, 0, 0],
+                seed_sequence: [1, 2, 3, 4, 5, 6, 7, 8],
+                header_version: 1,
+                reserved: [0; 3],
+            },
+            body: ReplayBody {
+                host_name: FixedLengthString::new("Host".to_string()),
+                client_name: FixedLengthString::new("Client".to_string()),
+                tag_host_name: None,
+                tag_client_name: None,
+                start_lp: 8000,
+                start_hand: 5,
+                draw_count: 1,
+                duel_options: DuelOptions::empty(),
+                duel_rule: 5,
+                host_deck: ReplayDeck::default(),
+                client_deck: ReplayDeck::default(),
+                tag_host_deck: None,
+                tag_client_deck: None,
+                datas: vec![ReplayData { data: vec![1, 2, 3] }],
+            },
+        };
+        original.fill_data_size();
 
         let mut buf = Cursor::new(Vec::new());
-        replay.write_le(&mut buf).unwrap();
+        original.write_le(&mut buf).unwrap();
         let written = buf.into_inner();
 
         let decoded = Replay::read_le(&mut Cursor::new(written)).unwrap();
-        assert_eq!(decoded.header.id, replay.header.id);
-        assert_eq!(decoded.body.host_name.to_string(), replay.body.host_name.to_string());
-        assert_eq!(decoded.body.start_lp, replay.body.start_lp);
-        assert_eq!(decoded.body.host_deck.main, replay.body.host_deck.main);
-        assert_eq!(decoded.body.datas.len(), replay.body.datas.len());
+        assert_eq!(decoded.header.id, original.header.id);
+        assert_eq!(decoded.header.version, original.header.version);
+        assert_eq!(decoded.header.flag, original.header.flag);
+        assert_eq!(decoded.header.data_size, original.header.data_size);
+        assert_eq!(decoded.header.seed_sequence, original.header.seed_sequence);
+        assert_eq!(decoded.body.host_name.to_string(), original.body.host_name.to_string());
+        assert_eq!(decoded.body.client_name.to_string(), original.body.client_name.to_string());
+        assert_eq!(decoded.body.start_lp, original.body.start_lp);
+        assert_eq!(decoded.body.duel_rule, original.body.duel_rule);
+        assert_eq!(decoded.body.datas.len(), original.body.datas.len());
     }
 }
