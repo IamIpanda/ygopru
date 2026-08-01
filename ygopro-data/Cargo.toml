@@ -11,7 +11,7 @@ encoding_rs = "0.8"
 lzma-rs = "0.3"
 num_enum = "0.7"
 thiserror = "1"
-rusqlite = { version = "0.39", features = ["bundled"], optional = true }
+rusqlite = { version = "0.39", features = ["bundled", "serialize"], optional = true }
 ygopro-derive = { path = "../ygopro-derive" }
 bytes = "1.11.1"
 modular-bitfield = "0.13.1"

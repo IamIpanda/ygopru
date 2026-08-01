@@ -98,11 +98,11 @@ pub struct WaitingSide;
 #[repr(C)]
 pub struct DeckCount {
     pub mainc_s: u16,
-    pub sidec_s: u16,
     pub extrac_s: u16,
+    pub sidec_s: u16,
     pub mainc_o: u16,
-    pub sidec_o: u16,
-    pub extrac_o: u16
+    pub extrac_o: u16,
+    pub sidec_o: u16
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]

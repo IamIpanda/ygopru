@@ -23,7 +23,9 @@ use ygopro_data::data::DuelOptions;
 
 pub type intptr_t = isize;
 
+pub mod constants;
 pub mod random;
+pub use constants::*;
 pub use random::DuelSeed;
 
 use crate::random::SEED_COUNT;

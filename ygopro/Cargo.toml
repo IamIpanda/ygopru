@@ -26,11 +26,18 @@ arc-swap = "1"
 hashbrown = "0"
 rand = "0.8"
 linkme = "0.3"
+glob = "0.3"
+
+zip = { version = "4", optional = true }
 
 ygopro-data = { path = "../ygopro-data" }
 ygopro-core-wrapper = { path = "../ygopro-core-wrapper" }
 ygopro-handler = { path = "../ygopro-handler" }
 ygopro-derive = { path = "../ygopro-derive" }
+
+[features]
+default = ["zip"]
+zip = ["dep:zip"]
 
 [profile.release]
 lto = true

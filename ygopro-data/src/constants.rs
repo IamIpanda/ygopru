@@ -315,6 +315,8 @@ bitflags! {
         const ToGrave = 0x800000;
         const BattlePhase = 0x1000000;
         const Equip = 0x2000000;
+        const BattleStepEnd = 0x4000000;
+        const Battled = 0x8000000;
     }
 }
 
@@ -349,6 +351,7 @@ bitflags! {
         const Pendulum = 0x1000000;
         const SpecialSummon = 0x2000000;
         const Link = 0x4000000;
+        const ExtraDeck = 0x4802040;
     }
 }
 
@@ -385,7 +388,12 @@ bitflags! {
         const Wyrm = 0x800000;
         const Cyberse = 0x1000000;
         const Illusion = 0x2000000;
+        const All = 0x3ffffff;
     }
+}
+
+impl Race {
+    pub const COUNT: u8 = 26;
 }
 
 
@@ -425,6 +433,7 @@ bitflags! {
         const LostOverlay = 0x20000000;
         const Maintenance = 0x40000000;
         const Action = 0x80000000;
+        const Procedure = 0x10280000;
     }
 }
 
@@ -514,7 +523,12 @@ bitflags! {
         const Light = 0x10;
         const Dark = 0x20;
         const Devine = 0x40;
+        const All = 0x7f;
     }
+}
+
+impl Attribute {
+    pub const COUNT: u8 = 7;
 }
 
 

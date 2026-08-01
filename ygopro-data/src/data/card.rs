@@ -119,7 +119,7 @@ impl<'row, 'stmt> TryFrom<&'row Row<'stmt>> for Card {
     fn try_from(row: &'row Row<'stmt>) -> Result<Self, Self::Error> {
         Ok(Card {
             card: CoreCard::try_from(row)?,
-            ot: Rule::from_bits_retain(row.get(1)?),
+            ot: Rule::from_bits_retain(row.get::<_, i64>(1)? as u8),
             category: Category::from_bits_retain(row.get::<_, i64>(10)? as u32),
             name: row.get(11)?,
             text: row.get(12)?,
@@ -168,6 +168,17 @@ where
     C: for<'row, 'stmt> TryFrom<&'row Row<'stmt>, Error = rusqlite::Error>,
 {
     let connection = Connection::open(file)?;
+    load_db(connection)
+}
+
+#[cfg(feature = "card")]
+pub fn load_db_from_bytes<C>(bytes: &[u8]) -> Result<Vec<C>, rusqlite::Error>
+where
+    C: for<'row, 'stmt> TryFrom<&'row Row<'stmt>, Error = rusqlite::Error>,
+{
+    let mut connection = Connection::open_in_memory()?;
+    let mut cursor = std::io::Cursor::new(bytes);
+    connection.deserialize_read_exact("main", &mut cursor, bytes.len(), true)?;
     load_db(connection)
 }
 

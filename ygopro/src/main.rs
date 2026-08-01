@@ -19,28 +19,6 @@ use ygopro_data::message::ctos;
 use ygopro_data::message::HostInfo;
 use ygopro_handler::RoomProvider;
 
-/// Seeds decoded from command line args[13..], indexed by duel count.
-/// Mirrors pre_seed[duel_count] in ../ygopro/gframe/single_duel.cpp:548.
-static PRE_SEEDS: OnceLock<Vec<[u32; ygopro_core_wrapper::random::SEED_COUNT]>> = OnceLock::new();
-
-/// Decode one base64 seed blob into the seed sequence, mirrors Base64::Decode in ../ygopro/gframe/gframe.cpp:112.
-fn decode_seed(seed_arg: &str) -> [u32; ygopro_core_wrapper::random::SEED_COUNT] {
-    let bytes = base64::engine::general_purpose::STANDARD.decode(seed_arg).unwrap();
-    let mut seed = [0u32; ygopro_core_wrapper::random::SEED_COUNT];
-    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
-        seed[index] = u32::from_le_bytes(chunk.try_into().unwrap());
-    }
-    seed
-}
-
-/// Provide the pre-seeded sequence for the given duel, or random if not specified.
-fn seed_generator(duel_count: u8) -> DuelSeed {
-    match PRE_SEEDS.get().and_then(|seeds| seeds.get(duel_count as usize)).copied() {
-        Some(seed) => DuelSeed::Complicated(seed),
-        None => DuelSeed::None,
-    }
-}
-
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -93,18 +71,31 @@ fn parse_args() -> (u16, HostInfo, ReplayMode) {
     (port, hostinfo, replay_mode)
 }
 
+static PRE_SEEDS: OnceLock<Vec<[u32; ygopro_core_wrapper::random::SEED_COUNT]>> = OnceLock::new();
+fn decode_seed(seed_arg: &str) -> [u32; ygopro_core_wrapper::random::SEED_COUNT] {
+    let bytes = base64::engine::general_purpose::STANDARD.decode(seed_arg).unwrap();
+    let mut seed = [0u32; ygopro_core_wrapper::random::SEED_COUNT];
+    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
+        seed[index] = u32::from_le_bytes(chunk.try_into().unwrap());
+    }
+    seed
+}
+
+fn seed_generator(duel_count: u8) -> DuelSeed {
+    match PRE_SEEDS.get().and_then(|seeds| seeds.get(duel_count as usize)).copied() {
+        Some(seed) => DuelSeed::Complicated(seed),
+        None => DuelSeed::None,
+    }
+}
+
 async fn start_server(port: u16, hostinfo: HostInfo, replay_mode: ReplayMode) {
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await.expect("Failed to bind to port");
-    let port = listener.local_addr().unwrap().port();
+    let port = listener.local_addr().expect("Failed to get random port").port();
     println!("{port}");
     log::info!("listening on port {port}");
-    let configuration = ygopro::single_duel::Configuration { 
-        no_init_shuffle_deck: false, 
-        allow_join_after_start: true, 
-        seed_generator: Some(seed_generator), 
-        override_best_of: 0,
-        replay_mode
-    };
+    let mut configuration = ygopro::managers::config_manager::get_duel_configuration();
+    configuration.seed_generator = Some(seed_generator);
+    configuration.replay_mode = replay_mode;
     let (mut duel, handle) = SingleDuelHost::new(hostinfo, configuration);
 
     tokio::spawn(async move {

@@ -34,3 +34,4 @@ ygopro-data和ygopro-handler已经抽象了结构。
 
 ## 你容易烦的错误
 - 无论是C++还是Rust，回放（.yrp）文件**不含** game message 流，只包含 Response 消息
+- 你的目标是严格按照用户的要求写出简洁、可用、人类可以维护的代码，不是可以编译的狗屎！！！

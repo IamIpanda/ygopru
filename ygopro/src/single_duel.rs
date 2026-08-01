@@ -8,7 +8,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
-use ygopro_core_wrapper::DuelSeed;
 use ygopro_core_wrapper as core;
 use ygopro_data::complex::Complex;
 use ygopro_data::constants::*;
@@ -38,11 +37,14 @@ pub fn init() {
 pub struct Configuration {
     pub no_init_shuffle_deck: bool,
     pub allow_join_after_start: bool,
-    pub seed_generator: Option<fn(u8) -> DuelSeed>,
+    pub seed_generator: Option<fn(u8) -> core::DuelSeed>,
     pub override_best_of: u8,
     // I don't like this field while most of these fields should be implemented in srvpro instead of ygopro.
     // So this field is only recorded here and will not get a implementation.
-    pub replay_mode: ReplayMode
+    pub replay_mode: ReplayMode,
+    /// Extra scripts preloaded into every core duel after creation.
+    /// Mirrors preload_script(pduel, "./script/special.lua") in ../ygopro/gframe/single_duel.cpp:583.
+    pub preloaded_scripts: Vec<String>,
 }
 
 impl Default for Configuration {
@@ -52,7 +54,8 @@ impl Default for Configuration {
             allow_join_after_start: true,
             seed_generator: None,
             override_best_of: 0,
-            replay_mode: ReplayMode::empty()
+            replay_mode: ReplayMode::empty(),
+            preloaded_scripts: vec!["./script/special.lua".to_string()]
         }
     }
 }
@@ -180,11 +183,11 @@ impl<State, Res> FromRequest<common::Request, State, Res> for PlayerIndex where 
     }
 }
 
-fn default_seed_generator(_match_count: u8) -> DuelSeed {
-    return DuelSeed::None
+fn default_seed_generator(_match_count: u8) -> core::DuelSeed {
+    return core::DuelSeed::None
 }
 
-pub struct SingleDuel {
+struct SingleDuel {
     duel: common::Duel,
     players: [Option<DuelPlayer>; 2], 
     observers: Vec<Option<BaseDuelPlayer>>,
@@ -243,8 +246,8 @@ impl SingleDuel {
             duel_winner: Vec::new(),
             time_elapsed: 0,
             start_time: 0,
-            resoponse_buffer: BytesMut::zeroed(0x40000),
-            core_request_buffer: BytesMut::zeroed(0x40000),
+            response_buffer: BytesMut::zeroed(core::SIZE_RETURN_VALUE),
+            core_request_buffer: BytesMut::zeroed(core::SIZE_QUERY_BUFFER),
             configuration,
             messages: Vec::new(),
             masked_messages: Vec::new(),
@@ -818,10 +821,11 @@ mod ygopro_handlers {
     #[register_to(YGOPRO_HANDLERS)]
     fn on_response(duel: &mut SingleDuel, player: PlayerIndex, response: &ctos::Response) {
         duel.client_responses.push(response.clone());
-        // todo: discard the serde here.
-        let mut data = vec![];
-        response.write_le(&mut Cursor::new(&mut data)).ok();
-        duel.set_responseb(&data);
+        {
+            let mut cursor = Cursor::new(&mut duel.response_buffer[..]);
+            response.write_le(&mut cursor).ok();
+        }
+        duel.set_responseb(&duel.response_buffer);
         if let Some(duel_player) = duel.get_player_mut_index(player) {
             duel_player.state = Some(ctos::MessageType::LeaveGame);
         }
@@ -884,6 +888,11 @@ mod ygopro_handlers {
         duel.first_attack_player = Some(if tp_result.result == CorePlayer::FirstAttackPlayer { player } else { player.opponent() });
         duel.set_player_info(CorePlayer::FirstAttackPlayer,  duel.host_info.start_lp as i32, duel.host_info.start_hand as i32, duel.host_info.draw_count as i32);
         duel.set_player_info(CorePlayer::SecondAttackPlayer, duel.host_info.start_lp as i32, duel.host_info.start_hand as i32, duel.host_info.draw_count as i32);
+        for script in &duel.configuration.preloaded_scripts {
+            if duel.preload_script(script) == 0 {
+                warn!("Failed to preload script: {script}");
+            }
+        }
         if !(duel.host_info.no_shuffle_deck || duel.configuration.no_init_shuffle_deck) {
             duel.shuffle_deck();
         }
@@ -1413,14 +1422,9 @@ mod ygopro_handlers {
             })
         }.into());
 
-        let new_turn = stoc::GameMessage {
-            message: gm::Message::NewTurn(gm::NewTurn {
-                player: CorePlayer::FirstAttackPlayer,
-            })
-        };
-        messages.push(new_turn.clone().into());
+        messages.push(stoc::GameMessage { message: gm::Message::NewTurn(gm::NewTurn { player: CorePlayer::FirstAttackPlayer }) }.into());
         if duel.turn_player == CorePlayer::SecondAttackPlayer {
-            messages.push(new_turn.into());
+            messages.push(stoc::GameMessage { message: gm::Message::NewTurn(gm::NewTurn { player: CorePlayer::SecondAttackPlayer }) }.into());
         }
 
         messages.push(stoc::GameMessage {
@@ -1597,9 +1601,8 @@ mod ygocore_handlers {
             let engine_flag = result.flags();
             let engine_length = result.data_length() as usize;
             if engine_length > 0 {
-                let mut buffer = vec![0u8; engine_length as usize];
-                duel.get_message(&mut buffer);
-                let mut cursor = Cursor::new(&buffer);
+                duel.duel.get_message(&mut duel.core_request_buffer[..]);
+                let mut cursor = Cursor::new(&duel.core_request_buffer[..engine_length]);
                 while let Ok(message) = gm::Message::read_le(&mut cursor) {
                     messages.push(message);
                 }

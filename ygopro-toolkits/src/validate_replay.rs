@@ -108,13 +108,10 @@ pub async fn validate_replay(path: &Path) -> Result<ValidationSummary, Validatio
     }
     REPLAY_SEED.set(replay.header.seed_sequence).ok();
 
-    let (mut host, _duel_task) = SingleDuelHost::new(Default::default(), Configuration {
-        allow_join_after_start: false,
-        no_init_shuffle_deck: true,
-        override_best_of: 0,
-        seed_generator: None,
-        replay_mode: ReplayMode::empty()
-    });
+    let mut configuration = Configuration::default();
+    configuration.no_init_shuffle_deck = true;
+    
+    let (mut host, _duel_task) = SingleDuelHost::new(replay.host_info(), configuration);
 
     let (host_ctos_sender, host_ctos_receiver) = mpsc::unbounded_channel();
     let (client_ctos_sender, client_ctos_receiver) = mpsc::unbounded_channel();
