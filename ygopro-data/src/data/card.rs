@@ -86,7 +86,10 @@ impl<'row, 'stmt> TryFrom<&'row Row<'stmt>> for CoreCard {
 
     fn try_from(row: &'row Row<'stmt>) -> Result<Self, Self::Error> {
         let level_raw: u32 = row.get(7)?;
+        let defense_raw: i32 = row.get(6)?;
         let setcode_raw: i64 = row.get(3)?;
+        let card_type: Type = Type::from_bits_retain(row.get(4)?);
+        let is_link = card_type.contains(Type::Link);
         Ok(CoreCard {
             code: row.get(0)?,
             alias: row.get(2)?,
@@ -98,15 +101,19 @@ impl<'row, 'stmt> TryFrom<&'row Row<'stmt>> for CoreCard {
                 sc[3] = ((setcode_raw >> 48) & 0xFFFF) as u16;
                 sc
             },
-            card_type: Type::from_bits_retain(row.get(4)?),
+            card_type,
             level: level_raw & 0xFF,
             attribute: Attribute::from_bits_retain(row.get(9)?),
             race: Race::from_bits_retain(row.get(8)?),
             attack: row.get(5)?,
-            defense: row.get(6)?,
+            defense: defense_raw,
             left_scale: (level_raw >> 24) & 0xFF,
             right_scale: (level_raw >> 16) & 0xFF,
-            link_marker: Linkmarkers::from_bits_retain((level_raw >> 8) & 0xFF),
+            link_marker: if is_link {
+                Linkmarkers::from_bits_retain(defense_raw as u32)
+            } else {
+                Linkmarkers::empty()
+            },
             rule_code: 0,
         })
     }

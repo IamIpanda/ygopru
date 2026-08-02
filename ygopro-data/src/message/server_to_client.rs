@@ -222,6 +222,11 @@ pub struct HsWatchChange {
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
+#[message(stoc, flag = 35)]
+#[repr(C)]
+pub struct TeammateSurrender;
+
+#[derive(BinRead, BinWrite, Debug, Clone, Message)]
 #[message(stoc, flag = 48)]
 #[repr(C)]
 pub struct FieldFinish;

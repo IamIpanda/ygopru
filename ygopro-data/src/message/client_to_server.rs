@@ -3,12 +3,12 @@
 
 use binrw::BinRead;
 use binrw::BinWrite;
-use binrw::helpers::until_eof;
 use ygopro_derive::Message;
 
 use crate::generate_enum;
 use crate::constants::CorePlayer;
 use crate::data::Deck;
+use crate::data::Response as DataResponse;
 use crate::message::HostInfo;
 use crate::utils::string::{FixedLengthString, U16String};
 
@@ -19,8 +19,8 @@ every_client_to_server_flat_message!(generate_enum);
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
 #[message(ctos, flag = 1)]
 pub struct Response {
-    #[br(parse_with = until_eof)]
-    pub response: Vec<u8> // Leaded array
+    #[br(args_raw = None)]
+    pub response: DataResponse
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]

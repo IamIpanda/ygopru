@@ -4,6 +4,7 @@ mod query;
 mod replay;
 mod card;
 mod strings;
+mod response;
 
 pub use deck::*;
 #[allow(unused_imports)]
@@ -12,3 +13,4 @@ pub use replay::*;
 pub use query::*;
 pub use card::*;
 pub use strings::*;
+pub use response::*;

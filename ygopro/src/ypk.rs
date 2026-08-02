@@ -1,6 +1,5 @@
 pub mod archive_manager {
     use std::fs;
-    use std::io::Cursor;
     use std::io::Read;
     use std::sync::Arc;
 
@@ -11,7 +10,7 @@ pub mod archive_manager {
 
     struct ExpansionArchive {
         path: String,
-        archive_reader: Mutex<ZipArchive<Cursor<Vec<u8>>>>,
+        archive_reader: Mutex<ZipArchive<fs::File>>,
     }
 
     static GLOBAL_ARCHIVES: ArcSwapOption<Vec<ExpansionArchive>> = ArcSwapOption::const_empty();
@@ -28,11 +27,11 @@ pub mod archive_manager {
             if !is_expansion_archive(&path) {
                 continue;
             }
-            let Ok(data) = fs::read(&path) else {
-                warn!("Failed to read archive {}", path.display());
+            let Ok(file) = fs::File::open(&path) else {
+                warn!("Failed to open archive {}", path.display());
                 continue;
             };
-            match ZipArchive::new(Cursor::new(data)) {
+            match ZipArchive::new(file) {
                 Ok(archive_reader) => expansion_archives.push(ExpansionArchive {
                     path: path.display().to_string(),
                     archive_reader: Mutex::new(archive_reader),

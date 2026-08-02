@@ -408,6 +408,7 @@ pub mod config_manager {
             load().as_ref().and_then(|config_manager| config_manager.get(key).map(|value| value.to_string()))
         };
         crate::single_duel::Configuration {
+            no_mask: get_value("no_mask").is_some(),
             no_init_shuffle_deck: get_value("no_init_shuffle_deck").is_some(),
             allow_join_after_start: get_value("allow_join_after_start").map(|_| true).unwrap_or(true),
             seed_generator: None,

@@ -14,9 +14,10 @@ use lzma_rs::lzma_decompress_with_options;
 
 use crate::constants::Mode;
 use crate::constants::Rule;
+use crate::data::ReplayDeck;
+use crate::data::Response;
 use crate::message::HostInfo;
 use crate::utils::string::FixedLengthString;
-use crate::data::ReplayDeck;
 
 const SIZE_REPLAY_SEED: usize = 8;
 
@@ -131,8 +132,8 @@ pub struct ReplayBody {
 pub struct ReplayData {
     #[bw(calc(data.len() as u8))]
     size: u8,
-    #[br(count = size)]
-    pub data: Vec<u8>
+    #[br(count = size, map = |bytes: Vec<u8>| Response::Unknown(bytes))]
+    pub data: Response
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone)]
@@ -260,6 +261,7 @@ mod test {
     use crate::data::Replay;
 
     #[test]
+    #[ignore]
     fn test_deserialize_replay() {
        let arr = std::fs::read("/Users/iami/Downloads/极羽光_vs_爱尔琳妮_20260531225205_G1.yrp").unwrap();
        let mut reader = Cursor::new(arr);
@@ -276,6 +278,7 @@ mod test {
         use crate::data::ReplayBody;
         use crate::data::ReplayDeck;
         use crate::data::ReplayData;
+        use crate::data::Response;
         use crate::data::DuelOptions;
         use crate::utils::string::FixedLengthString;
 
@@ -306,7 +309,7 @@ mod test {
                 client_deck: ReplayDeck::default(),
                 tag_host_deck: None,
                 tag_client_deck: None,
-                datas: vec![ReplayData { data: vec![1, 2, 3] }],
+                datas: vec![ReplayData { data: Response::Unknown(vec![1, 2, 3]) }],
             },
         };
         original.fill_data_size();

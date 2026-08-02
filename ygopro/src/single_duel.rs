@@ -35,6 +35,7 @@ pub fn init() {
 }
 
 pub struct Configuration {
+    pub no_mask: bool,
     pub no_init_shuffle_deck: bool,
     pub allow_join_after_start: bool,
     pub seed_generator: Option<fn(u8) -> core::DuelSeed>,
@@ -50,6 +51,7 @@ pub struct Configuration {
 impl Default for Configuration {
     fn default() -> Self {
         Self {
+            no_mask: false,
             no_init_shuffle_deck: false,
             allow_join_after_start: true,
             seed_generator: None,
@@ -69,7 +71,8 @@ pub enum Request {
     Evolve,
     /// resend all history to target observer.
     /// produced by observer join on middle of duel.
-    Soumatou(Netplayer)
+    Soumatou(Netplayer),
+    Stop
 }
 
 type BaseDuelPlayer = common::DuelPlayer<Complex<stoc::Message>>;
@@ -347,6 +350,9 @@ impl SingleDuel {
                         for message in &duel.masked_messages {
                             duel._send(message.clone(), target);
                         }
+                    },
+                    Request::Stop => {
+                        break
                     }
                 }
             }
@@ -610,7 +616,7 @@ impl SingleDuel {
         let is_waiting_for = message.waiting_for();
         let can_player_0_see_unmasked = !message.should_mask(self.to_core_player(PlayerIndex::Player1));
         let can_player_1_see_unmasked = !message.should_mask(self.to_core_player(PlayerIndex::Player2));
-        let masked_message = message.clone_masked();
+        let masked_message = if self.configuration.no_mask { message.clone() } else { message.clone_masked() };
         let message = Complex::from_message(stoc::Message::GameMessage(stoc::GameMessage { message }));
         let masked_message = Complex::from_message(stoc::Message::GameMessage(stoc::GameMessage { message: masked_message }));
         // Select message always skip record steps.
@@ -678,11 +684,12 @@ impl SingleDuel {
     }
     
     pub fn shuffle_deck(&mut self) {
-        if let Some(deck) = self.players[0].as_mut().map(|p| &mut p.deck) {
-            self.duel.shuffle_deck(&mut deck.main);
-        }
-        if let Some(deck) = self.players[1].as_mut().map(|p| &mut p.deck) {
-            self.duel.shuffle_deck(&mut deck.main);
+        let first_attacker = self.first_attack_player.unwrap_or(PlayerIndex::Player1);
+        let shuffle_order = [first_attacker as usize, first_attacker.opponent() as usize];
+        for index in shuffle_order {
+            if let Some(deck) = self.players[index].as_mut().map(|p| &mut p.deck) {
+                self.duel.shuffle_deck(&mut deck.main);
+            }
         }
     }
 }
@@ -739,11 +746,13 @@ impl RoomProvider<ctos::Message, Complex<stoc::Message>> for SingleDuelHost {
             loop {
                 tokio::select! {
                     message = ctos_stream.next() => {
+                        let gone = message.is_none();
                         let message = match message {
                             Some(message) => message,
                             None => ctos::Message::LeaveGame(ctos::LeaveGame)
                         };
                         ctos_sender.send(Request::Message(common::Request { message, extra: my_position })).ok();
+                        if gone { break }
                     }
                     message = stoc_stream.next() => {
                         if let Some(message) = message {
