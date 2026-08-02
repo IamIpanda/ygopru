@@ -35,7 +35,12 @@ fn main() {
     build.include(&ocgcore_dir);
     build.include(&lua_dir);
 
-    build.flag("-Wno-deprecated-declarations");
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_env == "msvc" {
+        build.flag("/TP");
+    } else {
+        build.flag("-Wno-deprecated-declarations");
+    }
 
     for entry in glob(ocgcore_dir.join("*.cpp").to_str().unwrap()).unwrap() {
         let path = entry.unwrap();

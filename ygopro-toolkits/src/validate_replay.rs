@@ -16,6 +16,8 @@ use tokio_util::codec::FramedRead;
 use tokio_util::codec::FramedWrite;
 use tokio_util::codec::LengthDelimitedCodec;
 
+use ygopro::managers::DataManager;
+use ygopro::managers::data_manager;
 use ygopro::single_duel::Configuration;
 use ygopro::single_duel::SingleDuelHost;
 use ygopro_handler::RoomProvider;
@@ -23,6 +25,7 @@ use ygopro_data::complex::Complex;
 use ygopro_data::constants::CorePlayer;
 use ygopro_data::constants::Netplayer;
 use ygopro_data::data::Replay;
+use ygopro_data::data::ReplayDeck;
 use ygopro_data::data::Response;
 use ygopro_data::message::ctos;
 use ygopro_data::message::gm;
@@ -40,6 +43,8 @@ pub enum ValidationError {
     Io(std::io::Error),
     #[error("cannot parse replay file: {0}")]
     Parse(binrw::Error),
+    #[error("card database is missing cards: {0:?}")]
+    MissingCards(Vec<u32>),
     #[error("tag duel replays are not supported yet")]
     TagReplayNotSupported,
     #[error("replay contains no responses")]
@@ -121,6 +126,11 @@ pub async fn validate_replay(path: &Path, wait_port: Option<u16>, timeout_second
     if response_count == 0 {
         return Err(ValidationError::EmptyReplay);
     }
+
+    let data_manager = data_manager::load();
+    let data_manager = data_manager.as_ref().expect("data manager is not initialized");
+    check_deck_cards(&replay.body.host_deck, data_manager)?;
+    check_deck_cards(&replay.body.client_deck, data_manager)?;
 
     let mut configuration = Configuration::default();
     configuration.no_init_shuffle_deck = true;
@@ -230,4 +240,19 @@ fn handle_stoc(
         _ => (),
     }
     Ok(Outcome::Continue)
+}
+
+fn check_deck_cards(replay_deck: &ReplayDeck, data_manager: &DataManager) -> Result<(), ValidationError> {
+    let missing_cards: Vec<u32> = replay_deck
+        .main
+        .iter()
+        .chain(replay_deck.extra.iter())
+        .filter(|&&code| data_manager.get_card(code).is_none())
+        .copied()
+        .collect();
+    if missing_cards.is_empty() {
+        Ok(())
+    } else {
+        Err(ValidationError::MissingCards(missing_cards))
+    }
 }

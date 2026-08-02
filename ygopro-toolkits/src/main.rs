@@ -80,8 +80,7 @@ async fn main() {
                         );
                     }
                     Err(error) => {
-                        log::warn!("{}: replay is invalid", path.display());
-                        log::debug!("{}: {error}", path.display());
+                        log::error!("{}: replay is invalid: {error}", path.display());
                         failed_count += 1;
                     }
                 }

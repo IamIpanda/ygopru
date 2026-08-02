@@ -343,6 +343,9 @@ impl SingleDuel {
                             let (player, locations, sequence, query) = response.refresh;
                             returned_duel.refresh(player, locations, sequence, query);
                             duel = returned_duel;
+                            if duel.stage == DuelStage::End {
+                                break;
+                            }
                         }
                     },
                     Request::Soumatou(player) => {
@@ -831,6 +834,7 @@ mod ygopro_handlers {
     fn on_response(duel: &mut SingleDuel, player: PlayerIndex, response: &ctos::Response) {
         duel.client_responses.push(response.clone());
         {
+            duel.response_buffer.fill(0);
             let mut cursor = Cursor::new(&mut duel.response_buffer[..]);
             response.write_le(&mut cursor).ok();
         }
