@@ -6,10 +6,9 @@ pub mod archive_manager {
     use arc_swap::ArcSwapOption;
     use parking_lot::Mutex;
     use zip::ZipArchive;
-    use log::warn;
 
     struct ExpansionArchive {
-        path: String,
+        _path: String,
         archive_reader: Mutex<ZipArchive<fs::File>>,
     }
 
@@ -17,8 +16,10 @@ pub mod archive_manager {
 
     pub fn init() {
         let mut expansion_archives = Vec::new();
-        let Ok(entries) = fs::read_dir("./expansions") else {
-            warn!("Failed to read directory ./expansions");
+        let entries = if let Ok(entries) = fs::read_dir("./expansions") {
+            entries 
+        } else {
+            log::debug!("Failed to read directory ./expansions, it may not exists");
             GLOBAL_ARCHIVES.store(Some(Arc::new(expansion_archives)));
             return;
         };
@@ -28,15 +29,15 @@ pub mod archive_manager {
                 continue;
             }
             let Ok(file) = fs::File::open(&path) else {
-                warn!("Failed to open archive {}", path.display());
+                log::debug!("Failed to open archive {}", path.display());
                 continue;
             };
             match ZipArchive::new(file) {
                 Ok(archive_reader) => expansion_archives.push(ExpansionArchive {
-                    path: path.display().to_string(),
+                    _path: path.display().to_string(),
                     archive_reader: Mutex::new(archive_reader),
                 }),
-                Err(error) => warn!("Failed to open archive {}: {}", path.display(), error),
+                Err(error) => log::debug!("Failed to open archive {}: {}", path.display(), error),
             }
         }
         GLOBAL_ARCHIVES.store(Some(Arc::new(expansion_archives)));

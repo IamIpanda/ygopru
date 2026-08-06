@@ -1,8 +1,11 @@
-pub mod single_duel;
+mod single_duel;
 pub mod common;
 pub mod managers;
 #[cfg(feature = "zip")]
-pub mod ypk;
+mod ypk;
+
+pub use single_duel::SingleDuelHost as SingleDuel;
+pub use common::Configuration as Configuration;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
