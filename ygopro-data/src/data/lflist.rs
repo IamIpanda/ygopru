@@ -1,18 +1,8 @@
 use std::collections::HashMap;
-use lazy_static::lazy_static;
 
-lazy_static! {
-	pub static ref GENESYS_HASH_KEY: u32 = {
-		let mut h: u32 = 2166136261;
-		for byte in "genesys".bytes() {
-			h ^= byte as u32;
-			h = h.wrapping_mul(16777619);
-		}
-		h
-	};
-}
 const HASH_INITIAL_VALUE: u32 = 0x7dfcee6a;
 const GENESYS_HASH_MARKER: u32 = 0x43524544;
+const GENESYS_HASH_KEY: u32 = 0x965f7da9;
 
 #[derive(Debug, Clone)]
 pub struct LFList {
@@ -33,26 +23,33 @@ impl LFList {
             glist: HashMap::new(),
         }
     }
-    
+
     pub fn from(name: String, content: HashMap<u32, u8>, genesys: u32, glist: HashMap<u32, u32>) -> Self {
-        let mut hash = HASH_INITIAL_VALUE;
-        if genesys > 0 {
-            hash ^= ((*GENESYS_HASH_KEY << 18) | (*GENESYS_HASH_KEY >> 14)) ^ ((genesys << 9) | (genesys >> 23)) ^ ((GENESYS_HASH_MARKER << 27) | (GENESYS_HASH_MARKER >> 5));
-        }
-        for (&code, &ct) in &content {
-            hash ^= ((code << 18) | (code >> 14)) ^ ((code << (27 + ct)) | (code >> (5 - ct)));
-        }
-        for (&code, &ct) in &glist {
-            hash ^= ((code << 18) | (code >> 14)) ^ ((*GENESYS_HASH_KEY << 9) | (*GENESYS_HASH_KEY >> 23)) ^ ((ct << 27) | (ct >> 5));
-        }
-        Self {
-            hash,
+        let mut v = Self {
+            hash: HASH_INITIAL_VALUE,
             name,
             content,
             genesys,
             glist,
-        }
+        };
+        v.calculate_hash();
+        v
     }
+
+    pub fn calculate_hash(&mut self) {
+        let mut hash = HASH_INITIAL_VALUE;
+        if self.genesys > 0 {
+            hash ^= ((GENESYS_HASH_KEY  << 18) | (GENESYS_HASH_KEY  >> 14)) ^ ((self.genesys << 9) | (self.genesys >> 23)) ^ ((GENESYS_HASH_MARKER << 27) | (GENESYS_HASH_MARKER >> 5));
+        }
+        for (&code, &ct) in &self.content {
+            hash ^= ((code << 18) | (code >> 14)) ^ ((code << (27 + ct)) | (code >> (5 - ct)));
+        }
+        for (&code, &ct) in &self.glist {
+            hash ^= ((code << 18) | (code >> 14)) ^ ((GENESYS_HASH_KEY  << 9) | (GENESYS_HASH_KEY  >> 23)) ^ ((ct << 27) | (ct >> 5));
+        }
+        self.hash = hash;
+    }
+    
 }
 
 pub fn parse_lflist_content(content: &str) -> Vec<LFList> {
@@ -90,4 +87,63 @@ pub fn parse_lflist_content(content: &str) -> Vec<LFList> {
     }
     if !name.is_empty() { lists.push(LFList::from(name, limits, genesys, genesys_limits)); }
     lists
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::data::lflist::GENESYS_HASH_KEY;
+    use crate::data::lflist::parse_lflist_content;
+
+    /// How we get genesys hash key.
+    #[test]
+    #[ignore]
+    fn genesys_genesys_hash_key() {
+        let mut hash: u32 = 2166136261;
+        for byte in "genesys".bytes() {
+            hash ^= byte as u32;
+            hash = hash.wrapping_mul(16777619);
+        }
+        println!("Computed genesys hash key: 0x{:08x}", hash);
+        assert_eq!(GENESYS_HASH_KEY, hash);
+    }
+
+    /// Reference C++ code used to compute the expected hash:
+    ///
+    /// ```
+    /// #include <cstdint>
+    /// #include <cstdio>
+    /// #include <unordered_map>
+    ///
+    /// int main() {
+    ///     const uint32_t HASH_INITIAL_VALUE = 0x7dfcee6a;
+    ///     std::unordered_map<uint32_t, uint8_t> content = {
+    ///         {20292186, 0},
+    ///         {91869203, 0},
+    ///         {8633261, 1},
+    ///         {79606837, 1},
+    ///         {23434538, 1},
+    ///         {72270339, 2},
+    ///     };
+    ///     uint32_t hash = HASH_INITIAL_VALUE;
+    ///     for (auto& [code, count] : content) {
+    ///         hash = hash ^ ((code << 18) | (code >> 14)) ^ ((code << (27 + count)) | (code >> (5 - count)));
+    ///     }
+    ///     std::printf("hash = 0x%08x\n", hash);
+    /// }
+    /// ```
+    #[test]
+    fn calculate_hash_matches_cpp_reference() {
+        let content = "
+!test
+20292186 0
+91869203 0
+8633261 1
+79606837 1
+23434538 1
+72270339 2
+";
+        let lists = parse_lflist_content(content);
+        assert_eq!(lists.len(), 1);
+        assert_eq!(lists[0].hash, 0xdee2c97b);
+    }
 }
