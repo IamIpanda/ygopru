@@ -20,8 +20,8 @@ use ygopro::Configuration;
 use ygopro::SingleDuel;
 use ygopro_core_wrapper::DuelSeed;
 use ygopro_data::complex::Complex;
+use ygopro_data::constants::Color;
 use ygopro_data::constants::CorePlayer;
-use ygopro_data::constants::Netplayer;
 use ygopro_data::data::Replay;
 use ygopro_data::data::ReplayData;
 use ygopro_data::data::Response;
@@ -33,9 +33,7 @@ use ygopro_external_server_bridge::YgoproBinaryFactory;
 use ygopro_external_server_bridge::YgoproBinaryProvider;
 use ygopro_handler::RoomProvider;
 
-use crate::common::start_game;
-use crate::common::start_game::Player;
-use crate::common::start_game::ReconstructionError;
+use crate::common::start_game::*;
 
 pub async fn run(path: &Path, port: u16, server_bin: Option<PathBuf>, server_cwd: Option<PathBuf>) {
     ygopro::init();
@@ -104,9 +102,9 @@ impl RoomFactory for SingleDuelFactory {
 pub async fn drive_replay<Room>(provider: Room, replay: Replay) -> Result<(Player<Room>, Player<Room>), ReconstructionError>
 where Room: RoomProvider<ctos::Message, Complex<stoc::Message>> {
     let mut provider = provider;
-    let (mut player1, mut player2) = start_game::start_duel(&replay, &mut provider).await?;
+    let (mut player1, mut player2) = start_duel(&replay, &mut provider).await?;
     let responses: Vec<ctos::Response> = replay.body.datas.iter().map(|data| ctos::Response { response: data.data.clone() }).collect();
-    start_game::send_responses(&mut player1, &mut player2, responses).await?;
+    send_responses(&mut player1, &mut player2, responses).await?;
     tokio::time::sleep(Duration::from_millis(50)).await;
     for player in [&mut player1, &mut player2] {
         while player.stoc_stream.next().now_or_never().is_some() {}
@@ -300,7 +298,7 @@ async fn process_command<Factory: RoomFactory, Sink>(
     match command {
         Command::Save => {
             *origin_replay = current_replay.clone();
-            let message = Complex::from_message(stoc::Message::Chat(stoc::Chat { player: Netplayer::Observer(255), msg: "进度已保存。".into() }));
+            let message = Complex::from_message(stoc::Message::Chat(stoc::Chat { player: Color::Green.into(), msg: "[tsukuyomi]: 进度已保存。".into() }));
             sink1.send(message.clone()).await.ok();
             sink2.send(message).await.ok();
         },
@@ -322,9 +320,12 @@ async fn process_command<Factory: RoomFactory, Sink>(
         },
         Command::Restart => (*inner_player1, *inner_player2) = operate(factory, origin_replay.clone(), *swapped).await,
         Command::Help => {
-            let message = Complex::from_message(stoc::Message::Chat(stoc::Chat { player: Netplayer::Observer(255), msg: "命令: save 保存当前进度 / swap 交换玩家 / back 回到上一个决策 / back2 回退一个响应 / restart 恢复到保存的进度 / clear 重置到开始 / help 帮助 / exit 退出".into() }));
-            sink1.send(message.clone()).await.ok();
-            sink2.send(message).await.ok();
+            let message1 = Complex::from_message(stoc::Message::Chat(stoc::Chat { player: Color::Pink.into(), msg: "[tsukuyomi]: save 保存当前进度 / swap 交换玩家 / back 回到上一个决策 / back2 回退一个响应".into() }));
+            let message2 = Complex::from_message(stoc::Message::Chat(stoc::Chat { player: Color::Pink.into(), msg: "[tsukuyomi]: restart 恢复到保存的进度 / clear 重置到决斗开始 / help 帮助 / exit 退出".into() }));
+            sink1.send(message1.clone()).await.ok();
+            sink1.send(message2.clone()).await.ok();
+            sink2.send(message1).await.ok();
+            sink2.send(message2).await.ok();
         },
         Command::Clear => {
             current_replay.body.datas.clear();
