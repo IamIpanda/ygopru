@@ -121,7 +121,7 @@ Factory: RoomFactory + Send + Sync + 'static
 {
     let mut current_replay = replay.clone();
     tokio::spawn(async move {
-        let (mut inner_player1, mut inner_player2) = operate(&factory, replay.clone(), false).await;
+        let (mut inner_player1, mut inner_player2) = factory.create_room(replay.clone()).await.expect("failed to create room");
         let mut swapped = false;
         let mut client_to_server = futures::stream::select(
             source1.map(|message| (0usize, message)),
@@ -181,7 +181,7 @@ fn intercept_message(message: &stoc::Message) -> bool {
 }
 
 async fn operate<Factory: RoomFactory>(factory: &Factory, replay: Replay, swapped: bool) -> (Player<Factory::Room>, Player<Factory::Room>) {
-    let (player1, player2) = factory.create_room(replay).await.expect("boom");
+    let (player1, player2) = factory.create_room(replay).await.expect("failed to create room");
     log::info!("Room created.");
     player1.ctos_sender.send(ctos::RequestField.into()).ok();
     player2.ctos_sender.send(ctos::RequestField.into()).ok();
@@ -239,6 +239,7 @@ fn bridge_player(socket: TcpStream, player: CorePlayer, host_info: HostInfo, cli
         let mut server_to_client_sink = FramedWrite::new(writer, codec);
         server_to_client_sink.send(Complex::from_message(stoc::Message::JoinGame(stoc::JoinGame { info: host_info.clone() })).data).await.ok();
         server_to_client_sink.send(Complex::from_message(stoc::Message::TypeChange(stoc::TypeChange { player: player.into(), host: player == CorePlayer::FirstAttackPlayer })).data).await.ok();
+        client_to_server_sender.unbounded_send(ctos::RequestField.into()).ok();
         loop {
             tokio::select! {
                 frame = client_to_server_stream.next() => {
