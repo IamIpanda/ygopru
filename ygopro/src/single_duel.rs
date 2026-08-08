@@ -1366,7 +1366,7 @@ use crate::managers::*;
             let deck_manager = deck_manager::load();
             let data_manager = data_manager::load();
             let data_manager = data_manager.as_ref().expect("unintied data manager");
-            let lflist = deck_manager.as_ref().and_then(|dm| dm.get_lflist_by_hash(lflist_hash)).cloned().unwrap_or_else(|| ygopro_data::data::LFList::new(String::new(), std::collections::HashMap::new()));
+            let lflist = deck_manager.as_ref().and_then(|dm| dm.get_lflist_by_hash(lflist_hash)).cloned().unwrap_or_else(|| ygopro_data::data::LFList::new(String::new()));
             if let Some(deck_error) = duel_player.deck_error.take() {
                 messages.push(stoc::ErrorMessage { err: ErrorMessage::DeckError(deck_error) }.into());
             }
