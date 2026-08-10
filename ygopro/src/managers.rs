@@ -25,30 +25,38 @@ pub mod data_manager {
     }
 
     pub fn init() {
-        let db_path = super::config_manager::load()
-            .as_ref()
-            .and_then(|config_manager| config_manager.get("db_path"))
-            .unwrap_or("cards.cdb, expansions/*.cdb")
-            .to_string();
-
         let mut data_manager = DataManager::new();
-        for db_pattern in super::config_manager::split_paths(&db_path) {
-            let Ok(entries) = glob::glob(db_pattern) else {
-                log::warn!("Failed to parse glob {}", db_pattern);
-                continue;
-            };
-            for entry in entries {
-                let path = entry.map_err(|err| log::warn!("Failed to read glob entry {}: {:?}", db_pattern, err)).ok();
-                if let Some(path) = path {
-                    if let Some(bytes) = crate::ypk::archive_manager::read_file(&path.to_string_lossy()) {
-                        data_manager.load_db_from_bytes(&bytes)
+        #[cfg(feature = "card")]
+        {
+            let db_path = super::config_manager::load()
+                .as_ref()
+                .and_then(|config_manager| config_manager.get("db_path"))
+                .unwrap_or("cards.cdb, expansions/*.cdb")
+                .to_string();
+
+            for db_pattern in super::config_manager::split_paths(&db_path) {
+                let Ok(entries) = glob::glob(db_pattern) else {
+                    log::warn!("Failed to parse glob {}", db_pattern);
+                    continue;
+                };
+                for entry in entries {
+                    let path = entry.map_err(|err| log::warn!("Failed to read glob entry {}: {:?}", db_pattern, err)).ok();
+                    if let Some(path) = path {
+                        #[cfg(feature = "zip")]
+                        if let Some(bytes) = crate::ypk::archive_manager::read_file(&path.to_string_lossy()) {
+                            data_manager.load_db_from_bytes(&bytes)
+                                .map(|()| log::trace!("Loaded database {}", path.display()))
+                                .map_err(|err| log::warn!("Failed to load database {}: {:?}", path.display(), err)).ok();
+                        }
+                        #[cfg(not(feature = "zip"))]
+                        data_manager.load_db(&path.to_string_lossy())
                             .map(|()| log::trace!("Loaded database {}", path.display()))
                             .map_err(|err| log::warn!("Failed to load database {}: {:?}", path.display(), err)).ok();
                     }
                 }
             }
         }
-        #[cfg(feature = "zip")]
+        #[cfg(all(feature = "card", feature = "zip"))]
         for cdb_name in crate::ypk::archive_manager::cdb_names() {
             if let Some(bytes) = crate::ypk::archive_manager::read_file(&cdb_name) {
                 data_manager.load_db_from_bytes(&bytes)
@@ -60,8 +68,10 @@ pub mod data_manager {
         set_global(data_manager);
     }
 
+    #[cfg(feature = "card")]
     pub const CARD_ARTWORK_VERSIONS_OFFSET: u32 = 20;
 
+    #[cfg(feature = "card")]
     fn is_alternative(code: u32, alias: u32) -> bool {
         alias != 0 && alias < code + CARD_ARTWORK_VERSIONS_OFFSET && code < alias + CARD_ARTWORK_VERSIONS_OFFSET
     }
@@ -82,6 +92,7 @@ pub mod data_manager {
             }
         }
 
+        #[cfg(feature = "card")]
         pub fn load_db(&mut self, file: &str) -> Result<(), String> {
             let cards = ygopro_data::data::load_db_from_file::<Card>(file)
                 .map_err(|e| format!("Failed to load {}: {}", file, e))?;
@@ -90,6 +101,7 @@ pub mod data_manager {
             Ok(())
         }
 
+        #[cfg(feature = "card")]
         pub fn load_db_from_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
             let cards = ygopro_data::data::load_db_from_bytes::<Card>(bytes)
                 .map_err(|e| format!("Failed to load database: {}", e))?;
@@ -97,6 +109,7 @@ pub mod data_manager {
             Ok(())
         }
 
+        #[cfg(feature = "card")]
         fn insert_cards(&mut self, cards: Vec<Card>) {
             for mut card in cards {
                 if card.code == 5405695 {

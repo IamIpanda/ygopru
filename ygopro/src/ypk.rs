@@ -57,6 +57,7 @@ pub mod archive_manager {
         None
     }
 
+    #[cfg(feature = "card")]
     pub fn read_file(name: &str) -> Option<Vec<u8>> {
         match fs::read(name) {
             Ok(data) => Some(data),
@@ -64,6 +65,7 @@ pub mod archive_manager {
         }
     }
 
+    #[cfg(feature = "card")]
     pub fn cdb_names() -> Vec<String> {
         let guard = GLOBAL_ARCHIVES.load();
         let mut names = Vec::new();
