@@ -1811,6 +1811,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ygopru"
+version = "0.1.0"
+dependencies = [
+ "ygopro",
+ "ygopro-core-wrapper",
+ "ygopro-data",
+ "ygopro-derive",
+ "ygopro-external-server-bridge",
+ "ygopro-handler",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
