@@ -1,8 +1,8 @@
-mod single_duel;
+pub mod single_duel;
 pub mod common;
 pub mod managers;
 #[cfg(feature = "zip")]
-mod ypk;
+pub mod ypk;
 
 pub use single_duel::SingleDuelHost as SingleDuel;
 pub use common::Configuration as Configuration;
