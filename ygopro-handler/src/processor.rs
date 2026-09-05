@@ -1,3 +1,9 @@
+//! The message dispatcher: routes messages to handlers by key.
+//!
+//! A [`Processor`] holds a set of handlers keyed by message type (a [`MessageKey`]),
+//! plus a set of global handlers that run for every message. It dispatches each message
+//! through the matching handler chain and combines their responses.
+
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -19,6 +25,10 @@ use crate::handler::sync_handler::SyncHandler;
 use crate::handler::sync_handler::WithSubState;
 use crate::extract::Request;
 
+/// Clone the global handlers into every key list and sort each list by priority.
+///
+/// After resolving, the handler set should be considered frozen; mutating it afterwards
+/// would break the ordering or the global-handler copies.
 pub fn resolve_globals<K, H: Clone>(handlers: &mut HashMap<K, Vec<H>>, global_handlers: &[H], key: impl Fn(&H) -> u8) {
     for list in handlers.values_mut() {
         list.extend(global_handlers.iter().cloned());
@@ -42,7 +52,9 @@ impl ygopro_data::message::Message for All {
     }
 }
 
+/// The key that [`Processor`] used to look up the handlers for a message.
 pub trait MessageKey<Key> {
+    /// Get the message key.
     fn message_key(&self) -> Key;
 }
 
@@ -111,6 +123,10 @@ where
     }
 }
 
+/// The message dispatcher.
+///
+/// It holds handlers keyed by [`MessageKey`] and a set of global handlers, and routes
+/// each message through the matching chain.
 pub struct Processor<Key, Req, State = crate::handler::State, Res = (), H: Call<Req, State, Res> = crate::handler::tower_handler::TowerHandler<Req, State, Res>> {
     handlers: HashMap<Key, Vec<H>>,
     global_handlers: Vec<H>,
@@ -122,6 +138,7 @@ where
     Key: Eq + Hash,
     State: Send,
 {
+    /// Create an empty processor.
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
@@ -130,10 +147,12 @@ where
         }
     }
 
+    /// The number of registered handlers, including globals.
     pub fn handler_count(&self) -> usize {
         self.handlers.values().map(|handlers| handlers.len()).sum::<usize>() + self.global_handlers.len()
     }
 
+    /// Count the handlers grouped by module, dropping the duplicate global copies.
     pub fn handler_statistics(&self, module_name_of: fn(&H) -> &'static str) -> hashbrown::HashMap<&'static str, usize> {
         let mut handler_counts = hashbrown::HashMap::new();
         for handlers in self.handlers.values() {
@@ -157,6 +176,7 @@ where
         handler_counts
     }
 
+    /// Build a processor from builder functions, filtering by group and splitting globals.
     pub fn new_with_groups(builders: &[fn() -> (Key, H)], groups: &HashSet<String>, group_of: fn(&H) -> &'static str, is_all: impl Fn(&Key) -> bool) -> Self where H: Clone {
         let mut processor = Self::new();
         for build in builders {
@@ -174,18 +194,24 @@ where
         processor
     }
 
+    /// Register a handler for a message key.
     pub fn register(&mut self, message_key: Key, handler: H) {
         self.handlers.entry(message_key).or_default().push(handler);
     }
 
+    /// Register a global handler that runs for every message.
     pub fn register_global(&mut self, handler: H) {
         self.global_handlers.push(handler);
     }
 
+    /// Clone the global handlers into every key list and sort each list by priority.
+    ///
+    /// After resolving, the processor should not be modified anymore.
     pub fn resolve(&mut self) where H: Clone {
         resolve_globals(&mut self.handlers, &self.global_handlers, |h| h.priority());
     }
 
+    /// Run a bundle through the handler chain for the given key, stopping on [`StopFlag`].
     pub async fn process_bundle(&self, bundle: Bundle<Req, State, Res>, key: Key) -> Bundle<Req, State, Res>
     where
         Key: Eq + Hash,
@@ -199,6 +225,7 @@ where
         bundle
     }
 
+    /// Process a stream of messages, assembling a bundle per item and consuming the result.
     pub fn process<Item, InnerStream, AssembleBundle, ConsumeBundle>(
         self: std::sync::Arc<Self>,
         stream: InnerStream,
@@ -237,6 +264,18 @@ where
     Target: Send + 'static,
     Res: Send + 'static + std::ops::Mul<Output = Res>,
 {
+    /// Build a processor from two handler sets (target and source states), merging them.
+    ///
+    /// The source handlers are written against `SubState` but run against `Target`. This is
+    /// only sound for [`SyncHandler`], whose `Call` impl reinterprets
+    /// `&mut Bundle<Req, Target, Res>` as `&mut Bundle<Req, SubState, Res>` via the
+    /// [`handler::sync_handler::WithSubState`] layout guarantee.
+    ///
+    /// [`TowerHandler`] and [`AsyncHandler`] erase the handler behind a trait object
+    /// (`BoxCloneService` / `Arc<dyn Call>`), so they cannot be transmuted between state
+    /// types; the dual-state trick is unique to `SyncHandler`, which stores raw pointers
+    /// and monomorphized function pointers. The layout assumption is checked by
+    /// [`handler::sync_handler::assert_sync_handler_layout`] in [`extend`](Self::extend).
     pub fn new_with_dual_group<SubState>(
         target_builders: &[fn() -> (Key, SyncHandler<Req, Target, Res>)],
         source_builders: &[fn() -> (Key, SyncHandler<Req, SubState, Res>)],
@@ -266,6 +305,11 @@ where
         processor
     }
 
+    /// Merge the handlers of a source-state processor into this target-state processor.
+    ///
+    /// Each source handler is transmuted to run against `Target`. This assumes the
+    /// [`handler::sync_handler::WithSubState`] layout guarantee and is checked by
+    /// [`handler::sync_handler::assert_sync_handler_layout`].
     pub fn extend<SubState>(&mut self, processor_source: Processor<Key, Req, SubState, Res, SyncHandler<Req, SubState, Res>>)
     where
         SubState: Send + 'static,
@@ -281,6 +325,7 @@ where
     }
 }
 
+/// Create a bundle from a request, with default state and response.
 pub fn default_bundle<Req, State: Default, Res: Default>(request: Req) -> Bundle<Req, State, Res> {
     Bundle {
         request,

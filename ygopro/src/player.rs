@@ -22,6 +22,7 @@ pub enum AllowMessage {
 }
 
 impl AllowMessage {
+    /// Check if given message can be accepted by current setting.
     pub fn allowed(&self, message: &ctos::Message) -> bool {
         let message_type = ctos::MessageType::from(message);
         if matches!(message_type, ctos::MessageType::Chat | ctos::MessageType::Surrender | ctos::MessageType::LeaveGame | ctos::MessageType::RequestField) {

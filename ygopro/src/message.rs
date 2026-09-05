@@ -129,8 +129,15 @@ pub struct Timeout {
 #[message(ygopro, flag = 255)]
 pub struct Terminate;
 
+/// The response handling after all handlers have processed a message.
+///
+/// Each message implements [`Next`] to define what happens next when the
+/// handlers' combined response is [`ygopro_handler::extract::Response::Continue`]
+/// or [`ygopro_handler::extract::Response::Terminate`].
 trait Next {
+    /// Handle the [`ygopro_handler::extract::Response::Continue`] response.
     fn process_continue(_duel: &mut Duel) {}
+    /// Handle the [`ygopro_handler::extract::Response::Terminate`] response.
     fn process_terminate(duel: &mut Duel) {
         duel.queue_request_ex(MatchEnd);
     }
@@ -175,6 +182,11 @@ impl Next for Terminate {
 
 macro_rules! generate_enum {
     ($($message_name:ident = $message_flag:literal),*) => {
+        /// The internal message enum exchanged inside the duel actor.
+        ///
+        /// It wraps every message variant, and is never sent over the network.
+        ///
+        /// In doc and code, this enum is often written as `ygopro::Message`.
         #[derive(Debug)]
         pub enum Message {
             $($message_name($message_name)),*
@@ -183,12 +195,14 @@ macro_rules! generate_enum {
         impl ygopro_data::message::PureMessage for Message {}
 
         impl Message {
+            /// Dispatch to the message's [`Next`] implementation for the [`ygopro_handler::extract::Response::Continue`] response.
             pub fn process_continue(self, duel: &mut Duel) {
                 match self {
                     $(Message::$message_name(_) => <$message_name as Next>::process_continue(duel)),*
                 }
             }
 
+            /// Dispatch to the message's [`Next`] implementation for the [`ygopro_handler::extract::Response::Terminate`] response.
             pub fn process_terminate(self, duel: &mut Duel) {
                 match self {
                     $(Message::$message_name(_) => <$message_name as Next>::process_terminate(duel)),*
@@ -197,6 +211,7 @@ macro_rules! generate_enum {
         }
 
         impl ygopro_handler::MessageKey<u8> for Message {
+            /// The message flag of this message.
             fn message_key(&self) -> u8 {
                 match self {
                     $(Message::$message_name(_) => $message_flag),*
@@ -235,6 +250,7 @@ macro_rules! generate_enum {
             }
 
             impl $message_name {
+                /// Wrap this message into the [`Message`] enum.
                 pub fn into_message(self) -> Message {
                     self.into()
                 }

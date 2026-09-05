@@ -1,10 +1,10 @@
-//! ygocore game_message Handlers for [`Duel`].
+//! Handlers for ygocore game messages in a [`Duel`].
 //! 
-//! This module contains handlers for message from ygocore, and decide following things: 
-//! - Sending this message to which player(s), default All player.
-//! - Refreshing which field or card after this message.
+//! Each handler decides two things for a game message from ygocore:
+//! - Which player(s) to send the message to, defaulting to all players.
+//! - Which field or card to refresh after sending the message.
 //! 
-//! Masking message is the internal logic of message itself, and these handlers won't process.
+//! Masking is the message's own logic, so these handlers don't process it.
 
 use std::io::Cursor;
 
@@ -25,13 +25,27 @@ use crate::message as ygopro;
 use crate::duel::SendTarget;
 use crate::ygopro_handlers;
 
+/// The request type for ygocore handlers, carrying a [`gm::Message`].
+/// 
+/// The extra field is always [`Netplayer::Unknown`] and never used.
 pub type Request = ygopro_handler::extract::Request<gm::Message, Netplayer>; 
+/// The state type for ygocore handlers, which is the [`Duel`] state.
+/// 
+/// If you need [`SingleDuel`] or [`TagDuel`], register to the corresponding one.
 pub type State = ygopro_handlers::State<crate::duel::Duel>;
+/// The handler type for ygocore handlers.
 pub type Handler = ygopro_handler::sync_handler::SyncHandler<Request, State, Response>;
 
-/// Response type that
+/// The result of a ygocore game message handler.
+///
+/// It decides where to send the message and what to refresh after sending.
 pub struct Response {
+    /// Which player(s) to send the message to.
     pub target: SendTarget,
+    /// Which field or card to refresh after sending the message.
+    /// 
+    /// The tuple is `(player, location, sequence, query)`, where a negative sequence
+    /// refreshes the whole location.
     pub refresh: (CorePlayer, Location, i8, Query)
 }
 
@@ -108,13 +122,16 @@ impl IntoResponse<Response> for (CorePlayer, Location, i8, Query) {
     }
 }
 
+/// The distributed slice of ygocore handlers.
 #[distributed_slice]
 pub static YGOCORE_HANDLERS: [fn() -> (u8, Handler)];
 
+/// Name for activitating this module in the plugin system.
 #[distributed_slice(crate::plugin::DEFAULT_ENABLED_PLUGINS)]
 pub static NAME: &'static str = module_path!();
 
-/// process input messages, until waiting for user input or duel end.
+/// Process input messages, until waiting for user input or duel end.
+/// 
 /// named `process` in original ygopro.
 pub fn evolve(duel: &mut crate::duel::Duel) -> Vec<gm::Message> {
     if duel.ended { return vec![]; }

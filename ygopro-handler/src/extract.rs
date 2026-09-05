@@ -1,3 +1,37 @@
+//! Practical types used in the ygopro message flow.
+//!
+//! This module provides the request/response machinery that handlers use to extract
+//! their parameters and to produce a response.
+//!
+//! Due to Rust's orphan rule and impl-conflict limitations, only the following
+//! [`FromRequest`] implementations are provided. Names in `<>` are the free type
+//! variables of each impl.
+//!
+//! **Blanket impls**:
+//!
+//! | Extracted type | Source |
+//! |----------------|--------|
+//! | `Extra` (`SocketAddr`, `Netplayer`, `CorePlayer`, `usize`, `u8`, `u32`) | `Request<Message, Extra>` |
+//! | `&Message` | `Request<Message, Extra>` |
+//! | `&mut Bundle<Req, State, Res>` | `Bundle<Req, State, Res>` |
+//! | `&mut Response<Message>` | `Bundle<Req, State, Response<Message>>` |
+//! | `&mut StopFlag` | `Bundle<Req, State, Res>` |
+//! | `&mut Box<dyn Any + Send>` | `Bundle<Box<dyn Any + Send>, State, Res>` |
+//! | `&mut anymap` | `Bundle<Req, State, Res>` (requires `State: ContainsMapMut`) |
+//!
+//! **Per-variant impls** (generated for every message variant of `ctos::`, `stoc::` and
+//! `gm::`, which are treated equally; one example per family):
+//!
+//! | Extracted type | Source |
+//! |----------------|--------|
+//! | `&ctos::JoinGame` | `Request<ctos::Message, Extra>` / `ctos::Message` |
+//! | `&stoc::JoinGame` | `Request<stoc::Message, Extra>` / `stoc::Message` |
+//! | `&gm::Move` | `Request<gm::Message, Extra>` / `gm::Message` |
+//! | `&ctos::JoinGame` | `Request<Complex<ctos::Message>, Extra>` / `Complex<ctos::Message>` |
+//! | `&stoc::JoinGame` | `Request<Complex<stoc::Message>, Extra>` / `Complex<stoc::Message>` |
+//! | `&gm::Move` | `Request<Complex<gm::Message>, Extra>` / `Complex<gm::Message>` |
+//! | `&gm::Move` | `Request<Complex<stoc::Message>, Extra>` / `Complex<stoc::Message>` |
+
 use std::any::Any;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -13,8 +47,11 @@ use crate::IntoResponse;
 use crate::handler::Bundle;
 use crate::handler::FromRequest;
 
+/// A request carrying a message and an extra message.
 pub struct Request<Message, Extra> {
+    /// The message to dispatch.
     pub message: Message,
+    /// The extra data attached to the request (e.g. the sender's address or position).
     pub extra: Extra,
 }
 
@@ -207,6 +244,10 @@ macro_rules! impl_gm {
     };
 }
 
+/// An enum conforming to the ygopro data flow.
+/// 
+/// Its variants carry no inherent meaning; what each one means is decided by how the
+/// downstream handles the result.
 pub enum Response<Message> {
     /// Continue processing the message as normal.
     Continue,
@@ -352,6 +393,7 @@ where Response1: IntoResponse<Response<Message>>, Response2: IntoResponse<Respon
 }
 
 impl<Message> Response<Message> {
+    /// Map the message(s) inside this response to a new type.
     pub fn map<Message2>(self, mut f: impl FnMut(Message) -> Message2) -> Response<Message2> {
         match self {
             Response::Continue => Response::Continue,
@@ -375,11 +417,18 @@ ygopro_data::every_client_to_server_flat_message!(impl_ctos);
 ygopro_data::every_server_to_client_flat_message!(impl_stoc);
 ygopro_data::every_game_message_flat_message!(impl_gm);
 
+/// A state that exposes an `anymap` by shared reference.
+///
+/// Data is taken out by cloning (`CloneAny`), so it is only suitable for small,
+/// read-only values such as configuration.
 pub trait ContainsMap {
+    /// Get the `anymap` by shared reference.
     fn get_map(&self) -> &anymap3::Map<dyn anymap3::CloneAny + Send>;
 }
 
+/// A state that exposes an `anymap` by mutable reference.
 pub trait ContainsMapMut {
+    /// Get the `anymap` by mutable reference.
     fn get_map(&mut self) -> &mut anymap3::Map<dyn std::any::Any + Send>;
 }
 

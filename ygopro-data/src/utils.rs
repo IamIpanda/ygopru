@@ -1,3 +1,4 @@
+/// UTF-16 string helpers.
 pub mod string {
     #![allow(dead_code)]
 
@@ -40,6 +41,7 @@ pub mod string {
         data
     }
 
+    /// A fixed-length UTF-16 string, stored as a `u16` array with a lazily cached `String`.
     #[derive(Clone, BinRead, BinWrite)]
     pub struct FixedLengthString<const L: usize> {
         data: [u16; L],
@@ -67,6 +69,7 @@ pub mod string {
     }
 
     impl<const L: usize> FixedLengthString<L> {
+        /// Allocate an empty string with all-zero `u16` array.
         pub fn allocate() -> Self {
             Self {
                 data: [0u16; L],
@@ -74,10 +77,12 @@ pub mod string {
             }
         }
 
+        /// Check whether the string is empty (all entries are zero).
         pub fn is_empty(&self) -> bool {
             self.data.iter().all(|&x| x == 0)
         }
 
+        /// Create a string from a `String`, filling the fixed-length array.
         pub fn new(str: String) -> Self {
             let this = Self {
                 data: cast_to_fix_length_array(&str),
@@ -87,6 +92,7 @@ pub mod string {
             this
         }
 
+        /// Parse the `u16` array into the cached `String` if not yet done.
         pub fn resolve_data(&mut self) {
             if self.str.get() == None {
                 if let Some(str) = cast_to_string(&self.data) {
@@ -95,6 +101,7 @@ pub mod string {
             }
         }
 
+        /// Write the cached `String` back into the `u16` array if present.
         pub fn resolve_str(&mut self) {
             if let Some(str) = self.str.get() {
                 self.data = cast_to_fix_length_array(str);
@@ -122,6 +129,7 @@ pub mod string {
         }
     }
 
+    /// A UTF-16 string with no length limit, terminated by a `0`, with a lazily cached `String`.
     #[binrw]
     #[derive(Clone)]
     pub struct U16String {
@@ -146,6 +154,7 @@ pub mod string {
     }
 
     impl U16String {
+        /// Create a string from a `String`, appending a `0` terminator.
         pub fn new(str: String) -> Self {
             let this = Self {
                 data: cast_to_c_array(&str),
@@ -155,6 +164,7 @@ pub mod string {
             this
         }
 
+        /// Parse the `u16` vector into the cached `String` if not yet done.
         pub fn resolve_data(&self) {
             if self.str.get() == None {
                 if let Some(str) = cast_to_string(&self.data) {
@@ -163,6 +173,7 @@ pub mod string {
             }
         }
 
+        /// Write the cached `String` back into the `u16` vector if present.
         pub fn resolve_str(&mut self) {
             if let Some(str) = self.str.get() {
                 self.data = cast_to_c_array(str);
@@ -200,6 +211,7 @@ pub mod string {
     }
 }
 
+/// Lazy-deserialized messages.
 pub mod complex {
     use std::io::Cursor;
     use std::io::Write;
@@ -212,16 +224,31 @@ pub mod complex {
 
     use crate::message::PureMessage;
 
-    /// Lazy-deserialized message. Holds raw `Bytes` until first access,
-    /// then parses into `Message` once and caches the result via `OnceLock`.
-    /// When writing, always uses the original raw bytes — never re-serializes.
+    /// A lazy-deserialized message.
+    ///
+    /// It holds the raw wire bytes (`data`) and only parses them into a [`Message`] on
+    /// first access, caching the result in a [`OnceLock`]. When written out, [`BinWrite`]
+    /// emits the original raw bytes and never re-serializes.
+    ///
+    /// # Why it is fast
+    ///
+    /// - **No parse cost unless needed.** A message that is only forwarded or logged is
+    ///   never deserialized, so it skips the full decode cost entirely.
+    /// - **No re-serialize cost.** Writing emits the stored raw bytes, avoiding a re-encode
+    ///   of the already-parsed message.
+    /// - **Cheap clone.** Cloning copies only the reference-counted [`Bytes`] and resets the
+    ///   cache, so it does not deep-copy the message. [`super_clone`](Self::super_clone)
+    ///   is used when the cached message must also be cloned.
     #[derive(Debug)]
     pub struct Complex<Message> {
+        /// The raw wire bytes of the message.
         pub data: Bytes,
+        /// The lazily-parsed message cache.
         pub message: OnceLock<Message>,
     }
 
     impl<Message> Complex<Message> {
+        /// Create a `Complex` from raw wire bytes, without parsing.
         pub fn new(data: Bytes) -> Self {
             Self {
                 data,
@@ -229,6 +256,7 @@ pub mod complex {
             }
         }
 
+        /// Clone the `Complex`, including the cached message if present.
         pub fn super_clone(&self) -> Self where Message: Clone {
             Self {
                 data: self.data.clone(),
@@ -236,6 +264,7 @@ pub mod complex {
             }
         }
 
+        /// Get a reference to the raw wire bytes.
         pub fn bytes(&self) -> &Bytes {
             &self.data
         }
@@ -252,6 +281,7 @@ pub mod complex {
     }
 
     impl<Message: BinWrite> Complex<Message> where Message: BinWrite,for<'a> <Message as BinWrite>::Args<'a>: Default {
+        /// Create a `Complex` from a parsed message, serializing it to raw bytes.
         pub fn from_message(message: Message) -> Self {
             let mut cursor = Cursor::new(Vec::new());
             message.write_le(&mut cursor).expect("failed to serialize Complex message");
@@ -263,6 +293,7 @@ pub mod complex {
     }
 
     impl<Message: BinRead> Complex<Message> where for<'a> <Message as BinRead>::Args<'a>: Default {
+        /// Parse the message from the raw bytes on first access, caching it.
         pub fn try_get(&self) -> Result<&Message, binrw::Error> {
             if let Some(message) = self.message.get() {
                 return Ok(message);
@@ -271,6 +302,7 @@ pub mod complex {
             Ok(self.message.get_or_init(|| message))
         }
 
+        /// Consume the `Complex`, returning the cached message if it was parsed.
         pub fn into_inner(self) -> Option<Message> {
             self.try_get().ok();
             self.message.into_inner()

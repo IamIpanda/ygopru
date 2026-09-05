@@ -1,3 +1,11 @@
+//! A bridge that runs an external ygopro binary as a duel engine.
+//!
+//! This module spawns a ygopro binary as a subprocess, connects to it over TCP, and
+//! proxies the client-to-server and server-to-client message streams. It implements
+//! [`RoomProvider`] so it can be used as the duel backend.
+
+#![warn(missing_docs)]
+
 use std::future::Future;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -31,12 +39,14 @@ use ygopro_data::message::HostInfo;
 
 use ygopro_handler::RoomProvider;
 
+/// A factory that spawns external ygopro binary processes.
 pub struct YgoproBinaryFactory {
     binary_path: String,
     working_directory: String,
 }
 
 impl YgoproBinaryFactory {
+    /// Create a factory with the binary path and working directory.
     pub fn new(binary_path: String, working_directory: String) -> Self {
         Self {
             binary_path,
@@ -67,6 +77,11 @@ impl YgoproBinaryFactory {
         args
     }
 
+    /// Start a ygopro binary and return its provider.
+    ///
+    /// The binary prints its listening port on the first stdout line, which is parsed to
+    /// connect the TCP proxy. The process is reaped in the background; the returned
+    /// provider resolves its finish future when the process exits.
     pub async fn start(&self, name: String, host_info: HostInfo, seed: Option<Vec<[u32; SEED_COUNT]>>) -> std::io::Result<YgoproBinaryProvider> {
         let mut child = Command::new(&self.binary_path)
             .current_dir(&self.working_directory)
@@ -115,6 +130,10 @@ impl YgoproBinaryFactory {
     }
 }
 
+/// A provider backed by a running external ygopro binary.
+///
+/// It connects to the binary over TCP and proxies the message streams, signalling
+/// completion via a watch channel when the process exits.
 pub struct YgoproBinaryProvider {
     server_address: SocketAddr,
     finished_sender: watch::Sender<bool>,

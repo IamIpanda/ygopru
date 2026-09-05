@@ -27,12 +27,17 @@ use crate::duel::SendTarget;
 use crate::single_duel::SingleDuel;
 use crate::tag_duel::TagDuel;
 
+/// A wrapper of SingleDuel or TagDuel.
+/// 
+/// DuelHost keeps a mpsc sender from Duel Instance, and implement the RoomProvider.
 pub struct DuelHost {
     pub(crate) ctos_sender: mpsc::UnboundedSender<Request>,
+    /// Get a signal that only sent once when duel ends.
     pub finished_sender: watch::Sender<bool>,
 }
 
 impl DuelHost {
+    /// Create a duel by target HostInfo and Configuration.
     pub fn new(host_info: HostInfo, configuration: Configuration) -> Self {
         let (request_sender, handle) = if host_info.mode == Mode::Tag {
             let tag_duel = TagDuel::new(host_info.clone(), configuration);

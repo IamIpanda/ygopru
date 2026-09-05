@@ -1,7 +1,4 @@
 //! Basic duel functionalities.
-//!
-//! 
-//! 
 use std::any::Any;
 use std::io::Cursor;
 use std::mem::MaybeUninit;
@@ -29,6 +26,7 @@ use ygopro_handler::FromRequest;
 use crate::Configuration;
 use crate::ygopro_handlers;
 
+/// Log the handler counts of each enabled plugin at debug level.
 pub(crate) fn log_plugin_statistics(
     enabled_plugins: &hashbrown::HashSet<String>,
     ygopro_handler_counts: &hashbrown::HashMap<&'static str, usize>,
@@ -56,15 +54,23 @@ pub(crate) fn log_plugin_statistics(
     }
 }
 
+/// The target a [`stoc::Message`] would send to.
 #[derive(Clone, Copy, Default)]
 pub enum SendTarget {
+    /// Send message to a single player.
     Single(Netplayer),
+    /// Send message to all audience, but except the target player.
     Except(Netplayer),
+    /// Send message to a player, targeted by ygocore.
     Core(CorePlayer),
+    /// Send message to all audience.
     #[default]
     All,
+    /// Send message to all players, but skip observers.
     AllPlayer,
+    /// Send message to all observers, but skip players.
     AllObserver,
+    /// Don't send this message.
     None
 }
 
@@ -87,8 +93,12 @@ where State: Send, Res: Send, Message: Send {
     }
 }
 
+/// Abstract of a [`stoc::Message`] that will be sent.
+/// During the sending, the message may change due to different target.
 pub trait SendableMessage {
+    /// Get an copy from this message towards target player.
     fn resolve(&self, player_index: Netplayer) -> Complex<stoc::Message>;
+    /// Transform this message to the form towards target player.
     fn into_inner(self, player_index: Netplayer) -> Complex<stoc::Message>;
 }
 
@@ -102,6 +112,9 @@ impl SendableMessage for Complex<stoc::Message> {
     }
 }
 
+/// A [`gm::Message`] which may be masked.
+/// 
+/// See also: [`MaskedClone::clone_masked`] for how the masked copy is generated.
 struct MaymaskedMessage<F> {
     pub message: Complex<stoc::Message>,
     pub masked_message: Complex<stoc::Message>,
@@ -127,7 +140,8 @@ impl<F> SendableMessage for MaymaskedMessage<F> where F: Fn(Netplayer) -> bool {
 }
 
 impl<F> MaymaskedMessage<F> {
-    fn new(message: gm::Message, f: F) -> Self {
+    /// Create an message by target [`gm::Message`], with an function juding that if that message need to be masked.
+    pub fn new(message: gm::Message, f: F) -> Self {
         let masked_message = message.clone_masked();
         Self {
             message: Complex::from_message(stoc::Message::from(message)),
@@ -137,19 +151,32 @@ impl<F> MaymaskedMessage<F> {
     }
 }
 
+/// A struct that can transform a [`CorePlayer`] to [`SendTarget`].
 pub trait CorePlayerToSendTarget {
+    /// Transform a [`CorePlayer`] to a [`SendTarget`].
     fn transform(&self, player: CorePlayer) -> SendTarget;
 }
 
+/// The message dispatcher of a duel.
+/// 
+/// It routes [`stoc::Message`] to players and observers, and records every sent message.
 pub struct Sender {
+    /// Player senders, indexed by [`PlayerIndex`].
     pub players: Vec<mpsc::UnboundedSender<Complex<stoc::Message>>>,
+    /// Observer senders.
     pub observers: Slab<mpsc::UnboundedSender<Complex<stoc::Message>>>,
+    /// Senders of players who joined but have not yet sent [`ctos::PlayerInfo`] and [`ctos::JoinGame`].
     pub undecided: Slab<mpsc::UnboundedSender<Complex<stoc::Message>>>, 
+    /// Every sent message, not used for now. 
     pub messages: Vec<Complex<stoc::Message>>,
+    /// The masked copies of every sent message, used in joining game in middle.
+    /// 
+    /// See also: [`crate::plugin::soumatou`].
     pub masked_messages: Vec<Complex<stoc::Message>>
 }
 
 impl Sender {
+    /// Create an empty sender.
     pub fn new() -> Self {
         Self {
             players: Vec::new(),
@@ -160,6 +187,7 @@ impl Sender {
         }
     }
 
+    /// Send a standard message to the target, recording it for replay.
     pub fn send(&mut self, message: stoc::Message, target: SendTarget) {
         let complex_message = Complex::from_message(message);
         self.messages.push(complex_message.clone());
@@ -167,6 +195,9 @@ impl Sender {
         self.send_without_record(complex_message, target);
     }
 
+    /// Send a game message, masking it per-player.
+    /// 
+    /// The masked copy is recorded only when the message is not a prompt waiting for a response.
     pub fn send_game_message(&mut self, message: gm::Message, target: SendTarget, mask_judger: impl Fn(Netplayer) -> bool, core_transformer: impl CorePlayerToSendTarget) {
         let mut target = target;
         match target {
@@ -182,6 +213,7 @@ impl Sender {
         self.send_without_record(maymasked, target);
     }
 
+    /// Dispatch a message without recording it.
     pub(crate) fn send_without_record(&self, message: impl SendableMessage, target: SendTarget) {
         match target {
             SendTarget::Single(netplayer) => match netplayer {
@@ -236,40 +268,54 @@ impl Sender {
 }
 
 impl Sender {
+    /// Bind a player's sender at the given index, growing the slot list if the player joins out of order.
     pub(crate) fn set_player(&mut self, index: usize, sender: mpsc::UnboundedSender<Complex<stoc::Message>>) {
         if self.players.len() <= index { self.players.resize(index + 1, Self::dummy_sender()); }
         self.players[index] = sender;
     }
 
+    /// Detach a player's sender at the given index, keeping the slot occupied.
     pub(crate) fn clear_player(&mut self, index: usize) {
         if self.players.len() <= index { self.players.resize(index + 1, Self::dummy_sender()); }
         self.players[index] = Self::dummy_sender();
     }
 
+    /// Fill empty player slots with a sender whose receiver is dropped.
     fn dummy_sender() -> mpsc::UnboundedSender<Complex<stoc::Message>> {
         let (sender, _receiver) = mpsc::unbounded_channel();
         sender
     }
 }
 
-
+/// The request sent to [`Duel`] in actor model.
 pub enum Request {
+    /// A standard [`ctos::Message`].
     Message(ygopro_handlers::Request),
+    /// A extended internal [`ygopro::Message`](crate::message::Message).
     MessageEx(ygopro_handlers::RequestEx),
+    /// Make internal ygocore engine evolve its state.
+    /// That should be a command, but too important.
     Evolve,
+    /// A custom command.
     Command { name: &'static str, arguments: Option<Box<dyn Any + Send>> }
 }
 
 type BaseDuelPlayer = crate::player::BaseDuelPlayer<Complex<stoc::Message>>;
 type DuelPlayer = crate::player::DuelPlayer<Complex<stoc::Message>>;
 
+/// Strict [`Netplayer`].
 #[derive(Copy, Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
 pub struct PlayerIndex(pub u8);
 
+#[allow(non_upper_case_globals)]
 impl PlayerIndex {
+    /// The player at slot 1.
     pub const Player1: PlayerIndex = PlayerIndex(0);
+    /// The player at slot 2.
     pub const Player2: PlayerIndex = PlayerIndex(1);
+    /// The player at slot 3.
     pub const Player3: PlayerIndex = PlayerIndex(2);
+    /// The player at slot 4.
     pub const Player4: PlayerIndex = PlayerIndex(3);
 }
 
@@ -303,36 +349,70 @@ impl From<u8> for PlayerIndex {
     }
 }
 
+/// Basic Duel container.
 pub struct Duel {
+    /// Internal ygocore duel instance.
     pub core: core::Duel,
+    /// Duel name. It is often empty.
     pub name: FixedLengthString<20>,
+    /// Duel password. It is often empty.
     pub pass: FixedLengthString<20>,
+    /// Host player position.
+    /// 
+    /// Please note that host player can be an observer.
     pub host_player: Netplayer,
+    /// Duel info defined by origin ygopro protocol.
     pub host_info: HostInfo,
+    /// Stage this duel is current in.
     pub stage: DuelStage,
+    /// The message sender that routes messages to players and observers.
     pub sender: Sender,
+    /// A buffer that used to serialize [`ctos::Response`].
     pub response_buffer: BytesMut,
+    /// A buffer that used to deserialzie [`gm::Message`] from ygocore.
     pub core_request_buffer: BytesMut,
+    /// Player slot in current duel.
+    /// 
+    /// This vector should be in a fixed length.
     pub players: Vec<Option<DuelPlayer>>,
+    /// Max player count, should always be `players.len()`.
     pub max_player_count: usize,
+    /// Observers in current duel.
     pub observers: Slab<BaseDuelPlayer>,
+    /// A saver that mark if this duel is ended by a match kill effect.
     pub match_kill_card_code: i32,
+    /// How many duels this game has finished.
     pub duel_count: u8,
+    /// Who decide the first attack player in current duel.
     pub first_attack_decider: Option<PlayerIndex>,
+    /// The last sent select message. 
     pub last_select_message: Option<gm::Message>,
+    /// The last player sent the [`ctos::Response`].
     pub last_response: Option<PlayerIndex>,
     // extended by rust ygopro
+    /// Extra duel info defined by ygopru.
+    /// 
+    /// This field is extended by ygopru.
     pub configuration: Configuration,
+    /// A buffer that saves player who have already joined in , but haven't sent the [`ctos::PlayerInfo`] and [`ctos::JoinGame`].
     pub uninit_players: Slab<BaseDuelPlayer>,
     // replay recorder
+    /// The duel start time.
+    /// 
+    /// Only used by generating replay.
     pub start_time: u32,
+    /// All [`ctos::Response`] message sent by players.
+    /// 
+    /// Only used by generating replay.
     pub client_responses: Vec<ctos::Response>,
     // extended by actor models
+    /// A mpsc sender, which make outbound can send [`Request`] to duel.
     pub request_sender: mpsc::UnboundedSender<Request>,
     pub(crate) request_receiver: Option<mpsc::UnboundedReceiver<Request>>,
 }
 
 impl Duel {
+    /// Create a duel, defined by a [`HostInfo`] and [`struct@Configuration`].
     pub fn new(host_info: HostInfo, mut configuration: Configuration) -> Self {
         let seed = configuration.seed(0);
         let (request_sender, request_receiver) = mpsc::unbounded_channel();
@@ -363,24 +443,29 @@ impl Duel {
         }
     }
 
+    /// Get a player by [`PlayerIndex`].
     pub fn get(&self, index: PlayerIndex) -> Option<&DuelPlayer> {
         self.players.get(index.0 as usize)?.as_ref()
     }
 
+    /// Get a player by [`Netplayer`].
     pub fn get_net(&self, index: Netplayer) -> Option<&DuelPlayer> {
         let Netplayer::Player(index) = index else { return None };
         self.players.get(index as usize)?.as_ref()
     }
 
+    /// Get a mutable player by [`PlayerIndex`].
     pub fn get_mut(&mut self, index: PlayerIndex) -> Option<&mut DuelPlayer> {
         self.players.get_mut(index.0 as usize)?.as_mut()
     }
 
+    /// Get a mutable player by [`Netplayer`].
     pub fn get_net_mut(&mut self, index: Netplayer) -> Option<&mut DuelPlayer> {
         let Netplayer::Player(index) = index else { return None };
         self.players.get_mut(index as usize)?.as_mut()
     }
 
+    /// Get multiple player by [`PlayerIndex`].
     pub fn get_many_mut<const L: usize>(&mut self, index: [PlayerIndex; L]) -> [&mut Option<DuelPlayer>; L] {
         let player_count = self.players.len();
         let players_ptr = self.players.as_mut_ptr();
@@ -396,14 +481,42 @@ impl Duel {
         unsafe { result.map(|slot| slot.assume_init()) }
     }
 
+    /// Sends a standard `ctos` message to the [`Duel`] actor, targeting a single [`Netplayer`].
+    ///
+    /// The message is wrapped in a [`Request::Message`] along with the receiver, so the duel can
+    /// route the response to the correct player.
+    ///
+    /// See Also
+    /// --------
+    /// * [`ctos::Message`] — the standard client-to-server message enum queued by this method.
     pub fn queue_request<Message: Into<ctos::Message>>(&self, message: Message, player: Netplayer) {
         self.request_sender.send(Request::Message( ygopro_handlers::Request { message: message.into(), extra: player } )).ok();
     }
 
+    /// Sends an extended internal message to the [`Duel`] actor, targeting all receivers.
+    ///
+    /// Unlike [`queue_request`](Self::queue_request), the message type is the internal
+    /// [`ygopro::Message`](crate::message::Message) rather than a wire-level `ctos` message, and its
+    /// [`SendTarget`] defaults to all.
+    ///
+    /// See Also
+    /// --------
+    /// * [`message`](crate::message) — the module defining the internal `MessageEx` messages.
+    /// * [`ygopro::Message`](crate::message::Message) — the internal message enum queued by this method.
     pub fn queue_request_ex<Message: Into<crate::message::Message>>(&self, message: Message) {
         self.request_sender.send(Request::MessageEx( ygopro_handlers::RequestEx { message: message.into(), extra: SendTarget::All } )).ok();
     }
 
+    /// Queues a custom command for the [`Duel`] actor, optionally carrying arbitrary arguments.
+    ///
+    /// The command is dispatched by name through the [`command::COMMANDS`](crate::command::COMMANDS) registry and its
+    /// argument box is forwarded as-is.
+    ///
+    /// See Also
+    /// --------
+    /// * [`command`](crate::command) — the module defining commands and their handlers.
+    /// * [`command::COMMANDS`](crate::command::COMMANDS) — the command name to handler registry.
+    /// * [`command::CommandHandler`](crate::command::CommandHandler) — the handler type invoked for a command.
     pub fn queue_command(&self, command: &'static str, args: Option<Box<dyn Any + Send>>) {
         self.request_sender.send(Request::Command { name: command, arguments: args }).ok();
     }
@@ -425,6 +538,7 @@ impl DerefMut for Duel {
 }
 
 impl Duel {
+    /// Get a query, which is often used by target [`Location`].
     pub fn default_query(location: Location) -> Query {
         let every_one_want_this_query: Query = Query::Code | Query::Position | Query::Alias | Query::Type
                                                 | Query::Level | Query::Rank | Query::Attribute | Query::Race
@@ -439,6 +553,9 @@ impl Duel {
         }
     }
 
+    /// Query target location, return the cards at that location.
+    /// 
+    /// That query the ygocore.
     pub fn query_location_cards(&mut self, player: CorePlayer, location: Location, query: Query) -> gm::Message {
         let data_size = self.core.query_field_card(player, location, query, &mut self.core_request_buffer, false) as usize;
         let mut cursor = Cursor::new(&self.core_request_buffer[..data_size]);
@@ -446,6 +563,10 @@ impl Duel {
         gm::UpdateData { player, location, data: cards }.into()
     }
 
+    /// Query target location, and send response info to target player.
+    /// 
+    /// Leave Query empty to use [`default_query`](Duel::default_query).
+    /// That query the ygocore.
     pub fn refresh_location(&mut self, player: CorePlayer, locations: Location, query: Query) -> Vec<gm::Message> {
         let mut messasges = vec![];
         let players: &[CorePlayer] = if player == CorePlayer::All {
@@ -462,6 +583,10 @@ impl Duel {
         messasges
     }
 
+    /// Query target card (defined by Location and sequence), and send response info to target player.
+    /// 
+    /// Leave Query empty to use the [`default_query`](Duel::default_query).
+    /// That query the ygocore.
     pub fn refresh_card(&mut self, player: CorePlayer, location: Location, sequence: i8, mut query: Query) -> gm::Message {
         if query.is_empty() { query = Query::from_bits_retain(0xf81fff); }
         let len = self.core.query_card(player, location, sequence as u8, query, &mut self.core_request_buffer, false) as usize;
@@ -480,6 +605,7 @@ impl Duel {
         }.into()
     }
 
+    /// Send a game message to the target, masking it per-player when needed.
     pub fn send_game_message(&mut self, message: gm::Message, target: SendTarget, core_transformer: impl CorePlayerToSendTarget + PlayerConverter) {
         if message.waiting_for().is_some() { self.last_select_message = Some(message.clone()); }
         if self.configuration.no_mask {
@@ -495,6 +621,7 @@ impl Duel {
         }
     }
 
+    /// Refresh a card or location and send the update to all players.
     pub fn refresh(&mut self, player: CorePlayer, locations: Location, sequence: i8, query: Query, core_transformer: impl CorePlayerToSendTarget + PlayerConverter + Clone) {
         if sequence >= 0 {
             let message = self.refresh_card(player, locations, sequence, query);
@@ -507,6 +634,7 @@ impl Duel {
     }
 }
 
+/// Check whether a player's response is meaningful for the last select message.
 pub fn response_is_meaningful(response: &ygopro_data::data::Response, last_select_message: &gm::Message) -> bool {
     if gm::MessageType::from(last_select_message) == gm::MessageType::Retry { return false; }
     let resolved = match response {

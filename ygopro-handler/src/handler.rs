@@ -1,12 +1,23 @@
+//! The handler abstraction: extract parameters, produce a response, and combine them.
+//!
+//! This module defines how a handler receives a [`Bundle`] (via [`FromRequest`]), produces
+//! a response (via [`IntoResponse`]), and how responses are combined across the handler
+//! chain ([`Call`]). It also provides the three handler wrappers:
+//! [`tower_handler::TowerHandler`], [`async_handler::AsyncHandler`], and
+//! [`sync_handler::SyncHandler`].
+
 use std::future::Future;
 use std::pin::Pin;
 
+/// The type-erased state carried through the handler chain.
 #[derive(Debug)]
 pub struct State {
+    /// The type-erased state map.
     pub data: anymap3::Map<dyn std::any::Any + Send + Sync>,
 }
 
 impl State {
+    /// Create an empty state.
     pub fn new() -> Self {
         State { data: Default::default() }
     }
@@ -18,7 +29,9 @@ impl Default for State {
     }
 }
 
+/// A value that can be converted into a response.
 pub trait IntoResponse<Res> {
+    /// Convert this value into a response.
     fn into_response(self) -> Res;
 }
 
@@ -28,15 +41,18 @@ impl<T: Send> IntoResponse<T> for T {
     }
 }
 
+/// Define how A value be extracted from a [`Bundle`].
 pub trait FromRequest<Req, State, Res>: Sized
 where
     Req: Send,
     State: Send,
     Res: Send,
 {
+    /// Extract this value from the bundle.
     fn from_request(bundle: &mut Bundle<Req, State, Res>) -> Option<Self>;
 }
 
+/// A flag that stops the handler chain.
 #[derive(Debug)]
 pub struct StopFlag(pub bool);
 
@@ -46,29 +62,39 @@ impl Default for StopFlag {
     }
 }
 
+/// The container passed through the handler chain, carrying the request, response, state,
+/// and a stop flag.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Bundle<Req, State = crate::handler::State, Res = ()> {
+    /// The request being processed.
     pub request: Req,
+    /// The response being built.
     pub response: Res,
+    /// A flag to stop the chain.
     pub stop_flag: StopFlag,
     // In order to make multiple Call impl in SyncHandler, we must put state
     // in the last position because we use the mem-order trick here.
+    /// The state shared across handlers.
     pub state: State,
 }
 
 impl<Req, State, Res> Bundle<Req, State, Res> {
+    /// Create a bundle from a request, state, and response.
     pub fn new(request: Req, state: State, response: Res) -> Self {
         Bundle { request, state, response, stop_flag: Default::default() }
     }
 }
 
+/// A handler that takes extracted parameters and returns a future yielding a response.
 pub trait Handler<T, Req, State, Res>: Clone + Send + Sync + Sized + 'static
 where
     State: Send,
 {
+    /// The future produced when calling the handler.
     type Future: Future<Output = Option<Res>> + Send;
 
+    /// Call the handler with the bundle.
     fn call(&self, bundle: &mut Bundle<Req, State, Res>) -> Self::Future;
 }
 
@@ -190,11 +216,15 @@ impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13], T14);
 impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14], T15);
 impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15], T16);
 
+/// A type-erased handler callable with a whole bundle.
 pub trait Call<Req, State, Res>: Send + Sync {
+    /// Call the handler, returning the updated bundle.
     fn call(&self, bundle: Bundle<Req, State, Res>) -> Pin<Box<dyn Future<Output = Bundle<Req, State, Res>> + Send>>;
+    /// The handler's priority, used to sort the chain.
     fn priority(&self) -> u8;
 }
 
+/// A handler wrapper that integrates with the tower ecosystem.
 pub mod tower_handler {
     use std::convert::Infallible;
     use std::future::Future;
@@ -283,10 +313,20 @@ pub mod tower_handler {
         }
     }
 
+    /// A type-erased handler backed by a tower [`Service`].
+    ///
+    /// The most feature-complete and the slowest wrapper: it inserts a tower `Service`
+    /// layer (`HandlerService`), a boxed future (`HandlerServiceFuture`), and a
+    /// `BoxCloneService`, so every call pays for several layers of boxing and a
+    /// `oneshot` dispatch.
     pub struct TowerHandler<Req, State, Res> {
+        /// The boxed tower service.
         pub service: BoxCloneService<Bundle<Req, State, Res>, Bundle<Req, State, Res>, Infallible>,
+        /// The handler's priority.
         pub priority: u8,
+        /// The handler's name.
         pub name: &'static str,
+        /// The module the handler was registered from.
         pub module_name: &'static str,
     }
 
@@ -298,6 +338,7 @@ pub mod tower_handler {
         State: Send + 'static,
         Res: Send + std::ops::Mul<Output = Res> + 'static,
     {
+        /// Create a tower-backed handler.
         pub fn new<T: 'static>(
             priority: u8,
             name: &'static str,
@@ -361,6 +402,7 @@ pub mod tower_handler {
     }
 }
 
+/// A type-erased asynchronous handler.
 pub mod async_handler {
     use std::future::Future;
     use std::marker::PhantomData;
@@ -415,8 +457,15 @@ pub mod async_handler {
         }
     }
 
+    /// A type-erased asynchronous handler held in an [`Arc`].
+    ///
+    /// It gives up the tower adaptation layer, holding the handler in an `Arc<dyn Call>`
+    /// and boxing only the future. This drops the extra `Service` boxing while staying
+    /// cloneable through a cheap `Arc` clone.
     pub struct AsyncHandler<Req, State, Res> {
+        /// The handler's name.
         pub name: &'static str,
+        /// The module the handler was registered from.
         pub module_name: &'static str,
         handler: Arc<dyn Call<Req, State, Res>>,
     }
@@ -437,6 +486,7 @@ pub mod async_handler {
         State: Send + 'static,
         Res: Send + std::ops::Mul<Output = Res> + 'static,
     {
+        /// Create an async handler.
         pub fn new<T: 'static, H: Handler<T, Req, State, Res>>(
             priority: u8,
             name: &'static str,
@@ -475,6 +525,7 @@ pub mod async_handler {
     }
 }
 
+/// A type-erased synchronous handler.
 pub mod sync_handler {
     use std::future::Future;
     use std::pin::Pin;
@@ -487,10 +538,16 @@ pub mod sync_handler {
     ///
     /// Uses raw pointers and monomorphized function pointers to achieve type erasure
     /// without requiring `'static` bounds on `Req`, `State`, `Res`, or the handler's
-    /// type parameter `T`. The caller is responsible for ensuring soundness.
+    /// type parameter `T`. It gives up the async nature of [`Handler`] (its future is
+    /// always `Ready`), in exchange boxing nothing per call and enabling the dual-state
+    /// trick ([`WithSubState`]).
+    ///
+    /// The caller is responsible for ensuring soundness.
     #[repr(C)]
     pub struct SyncHandler<Req, State, Res> {
+        /// The handler's name. It is often function name.
         pub name: &'static str,
+        /// The module the handler was registered from. It is often produced by `module_path!()`.
         pub module_name: &'static str,
         priority: u8,
         handler_pointer: *const (),
@@ -510,6 +567,7 @@ pub mod sync_handler {
         State: Send,
         Res: Send,
     {
+        /// Create a synchronous handler.
         pub fn new<T, H: Handler<T, Req, State, Res, Future = std::future::Ready<Option<Res>>>>(
             priority: u8,
             name: &'static str,
@@ -610,6 +668,7 @@ pub mod sync_handler {
 
     unsafe impl<T> WithSubState<T> for T {}
 
+    /// Assert the layout of [`SyncHandler`] is identical across two state types.
     pub fn assert_sync_handler_layout<Req, SubState, Target, Res>() {
         const {
             assert!(std::mem::size_of::<SyncHandler<Req, SubState, Res>>() == std::mem::size_of::<SyncHandler<Req, Target, Res>>());

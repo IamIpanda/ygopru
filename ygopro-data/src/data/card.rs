@@ -1,3 +1,12 @@
+//! Card data and loading from the card database.
+//!
+//! Provides the [`CoreCard`] FFI structure shared with ygocore, plus the higher-level
+//! [`Card`] with localized name and text.
+//!
+//! The `card` feature gates the database-loading functions (`load_db`, `load_db_from_file`,
+//! `load_db_from_bytes`), because they pull in the `rusqlite` dependency. Everything else
+//! in this module is available without the feature.
+
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -12,6 +21,12 @@ use crate::constants::*;
 const SIZE_SETCODE: usize = 16;
 const SIZE_DESC: usize = 16;
 
+/// A card's core data, whose memory layout is identical to ygocore's `CardData`.
+///
+/// This is the FFI boundary structure passed to/from the core: the C++ `card_reader`
+/// callback fills a `*mut CoreCard`, so the `#[repr(C)]` layout must match ygocore's C++
+/// struct byte-for-byte. Because the layout is shared, a `CoreCard` can be handed directly
+/// to the core without conversion.
 #[repr(C)]
 #[derive(Clone, Default, Debug)]
 pub struct CoreCard {
@@ -31,14 +46,17 @@ pub struct CoreCard {
 }
 
 impl CoreCard {
+    /// The code used to unify cards, falling back to `code` when there is no alias.
     pub fn original_code(&self) -> u32 {
         if self.alias != 0 { self.alias } else { self.code }
     }
 
+    /// The code used in a duel, preferring the rule code over the original code.
     pub fn duel_code(&self) -> u32 {
         if self.rule_code != 0 { self.rule_code } else { self.original_code() }
     }
 
+    /// Check whether any set code matches the given value.
     pub fn is_setcodes(&self, value: u32) -> bool {
         for x in &self.setcode {
             if *x == 0 { return false; }
@@ -50,19 +68,27 @@ impl CoreCard {
     }
 }
 
+/// Check whether a set code matches a value.
 pub fn check_setcode(setcode: u32, value: u32) -> bool {
     setcode > 0 && 
         (setcode & 0x0fffu32) == (value & 0x0fffu32) && 
         (setcode & (value & 0xf000u32)) == (value & 0xf000u32)
 }
 
+/// A full card, combining the core data with the localized name and text.
 #[derive(Clone, Default, Debug)]
 pub struct Card {
+    /// The core card data.
     pub card: CoreCard,
+    /// The card's official/ocg/tcg availability.
     pub ot: OT,
+    /// The card's category.
     pub category: Category,
+    /// The card's localized name.
     pub name: String,
+    /// The card's localized text.
     pub text: String,
+    /// The card's desc strings.
     pub desc: [String; SIZE_DESC],
 }
 
@@ -152,6 +178,7 @@ impl<'row, 'stmt> TryFrom<&'row Row<'stmt>> for Card {
     }
 }
 
+/// Load cards from a SQLite connection.
 #[cfg(feature = "card")]
 pub fn load_db<C>(connection: Connection) -> Result<Vec<C>, rusqlite::Error>
 where
@@ -169,6 +196,7 @@ where
     Ok(res)
 }
 
+/// Load cards from a SQLite database file.
 #[cfg(feature = "card")]
 pub fn load_db_from_file<C>(file: &str) -> Result<Vec<C>, rusqlite::Error>
 where
@@ -178,6 +206,7 @@ where
     load_db(connection)
 }
 
+/// Load cards from an in-memory SQLite database read from raw bytes.
 #[cfg(feature = "card")]
 pub fn load_db_from_bytes<C>(bytes: &[u8]) -> Result<Vec<C>, rusqlite::Error>
 where
