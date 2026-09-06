@@ -1,6 +1,6 @@
 [package]
 name = "ygopro-handler"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
@@ -12,7 +12,7 @@ anymap3 = "1"
 binrw = "0.13"
 bytes = "1"
 futures = "0"
-hashbrown = "0"
+hashbrown = "0.17"
 pin-project-lite = "0"
 tokio = { version = "1", features = ["sync", "rt", "macros", "rt-multi-thread"] }
 tokio-stream = "0"

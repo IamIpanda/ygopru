@@ -44,13 +44,15 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             choco install upx -y
+            UPX_COMMAND="upx"
             BIN="target/release/ygopro.exe"
           else
             sudo apt-get update
             sudo apt-get install -y upx-ucl
+            UPX_COMMAND="upx-ucl"
             BIN="target/release/ygopro"
           fi
-          upx-ucl --best "$BIN"
+          "$UPX_COMMAND" --best "$BIN"
 
       - name: Package
         shell: bash
