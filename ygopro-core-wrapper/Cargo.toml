@@ -1,7 +1,11 @@
 [package]
 name = "ygopro-core-wrapper"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+description = "Rust bindings to the YGOPro core (ocgcore) duel engine."
+keywords = ["ygopro"]
 links = "ygopro-core"
 
 [dependencies]

@@ -30,9 +30,9 @@ use crate::ygopro_handlers::YGOPRO_HANDLERS;
 pub static NAME: &'static str = module_path!();
 
 pub static PRO_VERSION: LazyLock<u16> = LazyLock::new(|| {
-    let major = env!("CARGO_PKG_VERSION_MAJOR").parse::<u16>().unwrap();
-    let minor = env!("CARGO_PKG_VERSION_MINOR").parse::<u16>().unwrap();
-    let patch = env!("CARGO_PKG_VERSION_PATCH").parse::<u16>().unwrap();
+    let major = env!("YGOPRO_VERSION_MAJOR").parse::<u16>().unwrap();
+    let minor = env!("YGOPRO_VERSION_MINOR").parse::<u16>().unwrap();
+    let patch = env!("YGOPRO_VERSION_PATCH").parse::<u16>().unwrap();
     let hex_minor = minor % 10 + minor / 10 * 16;
     (major << 12) + (hex_minor << 4) + patch
 });
@@ -51,8 +51,8 @@ pub fn before_join_game(join_game: &ctos::JoinGame, stop_flag: &mut StopFlag) ->
 mod tests {
     #[test]
     fn version_parts_are_numbers() {
-        let _: u16 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
-        let _: u16 = env!("CARGO_PKG_VERSION_MINOR").parse().unwrap();
-        let _: u16 = env!("CARGO_PKG_VERSION_PATCH").parse().unwrap();
+        let _: u16 = env!("YGOPRO_VERSION_MAJOR").parse().unwrap();
+        let _: u16 = env!("YGOPRO_VERSION_MINOR").parse().unwrap();
+        let _: u16 = env!("YGOPRO_VERSION_PATCH").parse().unwrap();
     }
 }

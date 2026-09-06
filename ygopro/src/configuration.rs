@@ -1,25 +1,24 @@
-//! Configuration for ygopro server.
-//! 
-//! [`Configuration`] is an `anymap::Map` wrapper that can be used to store plugin configurations.
-//! Pass that to [`DuelHost::new`] to configure the server.
-//! It can be seen as `HostInfo` extended in this project.
-//! Any `Command`, `Handler` or `HandlerEx` will be ignored if its module name is not in the `enable_plugins` set.
-//!
-//! Example:
-//! ```rust,no_run
-//! let mut configuration = ygopro::Configuration::default();
-//! configuration.enable_plugin("ygopro::plugin::soumatou");
-//! let duel_host = ygopro::host::DuelHost::new(Default::default(), configuration);
-//! // or start it directly with the cli toolkits:
-//! # async fn run() {
-//! ygopro::cli::start_local_server(0, duel_host).await;
-//! # }
-//! ```
-
 use crate::plugin::*;
 
 use ygopro_core_wrapper as core;
 
+/// Configuration for ygopro server.
+/// 
+/// `Configuration` is an [`anymap3::Map`] wrapper that can be used to store plugin configurations.
+/// Pass that to [`DuelHost::new`](crate::host::DuelHost::new) to configure the server.
+/// It can be seen as `HostInfo` extended in this project.
+/// Any `Command`, `Handler` or `HandlerEx` will be ignored if its module name is not in the `enable_plugins` set.
+///
+/// Example:
+/// ```rust,no_run
+/// let mut configuration = ygopro::Configuration::default();
+/// configuration.enable_plugin("ygopro::plugin::soumatou");
+/// let duel_host = ygopro::host::DuelHost::new(Default::default(), configuration);
+/// // or start it directly with the cli toolkits:
+/// # async fn run() {
+/// ygopro::cli::start_local_server(0, duel_host).await;
+/// # }
+/// ```
 pub struct Configuration {
     pub no_mask: bool,
     pub seed_generator: Option<Box<dyn FnMut(u8) -> core::DuelSeed + Send>>,

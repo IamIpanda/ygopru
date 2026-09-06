@@ -1,3 +1,8 @@
+//! The constants and enums shared across the protocol.
+//!
+//! Holds the player positions (`Netplayer`, `CorePlayer`), card attributes, locations,
+//! phases, and the other protocol constants.
+
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 
@@ -23,6 +28,20 @@ pub enum Network {
     ClientId = 57078,
 }
 
+/// The position where a player is in a room slot.
+///
+/// In C++, `Netplayer` is a single enum value reused in many places. The Rust version
+/// splits it into several distinct types that are no longer guaranteed to be equal. This
+/// `Netplayer` is a compromise for the ygopro crate, adding the `Undecided` category and
+/// the observer's index. In particular, `Observer(255)` means the observer's slot is
+/// unknown.
+///
+/// These added parts are dropped when serializing: `Observer` always becomes `255`, to
+/// match the original data protocol. So (de)serialization of this type loses information
+/// and must be handled carefully, especially when using [`Complex`](crate::complex::Complex).
+///
+/// See also: [`CorePlayer`],
+/// [`ChatSource`](crate::message::server_to_client::ChatSource).
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
 #[br(map = |raw: u8| Netplayer::from_primitive(raw))]
 #[bw(map = |value: &Netplayer| u8::from(*value))]
@@ -32,15 +51,6 @@ pub enum Netplayer {
     Observer(u8),
     Undecided(u8),
     Unknown
-}
-
-impl Netplayer {
-    pub fn opponent(self) -> Self {
-        match self {
-            Netplayer::Player(p) => Netplayer::Player(p ^ 1),
-            _ => Netplayer::Unknown,
-        }
-    }
 }
 
 impl FromPrimitive for Netplayer {
@@ -86,6 +96,14 @@ impl Specifier for Netplayer {
     }
 }
 
+/// The position where a player is in ygocore.
+///
+/// This is a new type invented by this crate. Its values are exactly the same as the
+/// player in ygocore (often written as `tp` in lua). They are unrelated to the network
+/// slot of the first-attack player, so `CorePlayer` is not equal to [`Netplayer`]. How to
+/// relate `Netplayer` and `CorePlayer` is the downstream's own responsibility.
+///
+/// See also: [`Netplayer`].
 #[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug, PartialOrd, Ord, Hash)]
 #[brw(repr=u8)]
 #[repr(u8)]

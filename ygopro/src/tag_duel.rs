@@ -1,3 +1,7 @@
+//! The tag-duel room.
+//!
+//! [`TagDuel`] drives a 2v2 duel in the actor model.
+
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -26,6 +30,9 @@ use crate::duel::SendTarget;
 use crate::player::AllowMessage;
 use crate::ygopro_handlers::State;
 
+/// A tag-duel team.
+/// 
+/// We don't use [`PlayerIndex`] here because we want to strictly distinguish them.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
 pub enum TeamIndex {
     Team1,
@@ -33,6 +40,7 @@ pub enum TeamIndex {
 }
 
 impl TeamIndex {
+    /// The leader slot of this team.
     pub fn leader(self) -> PlayerIndex {
         match self {
             TeamIndex::Team1 => PlayerIndex::Player1,
@@ -40,6 +48,7 @@ impl TeamIndex {
         }
     }
 
+    /// The two member slots of this team.
     pub fn member(self) -> [PlayerIndex; 2] {
         match self {
             TeamIndex::Team1 => [PlayerIndex::Player1, PlayerIndex::Player2],
@@ -47,6 +56,7 @@ impl TeamIndex {
         }
     }
 
+    /// The opposing team.
     pub fn opponent(self) -> Self {
         match self {
             TeamIndex::Team1 => TeamIndex::Team2,
@@ -56,14 +66,17 @@ impl TeamIndex {
 }
 
 impl PlayerIndex {
+    /// The team this player belongs to.
     pub fn team(self) -> TeamIndex {
         if self.0 < 2 { TeamIndex::Team1 } else { TeamIndex::Team2 }
     }
 
+    /// The teammate of this player.
     pub fn teammate(self) -> Self {
         PlayerIndex(self.0 ^ 1)
     }
 
+    /// The opposing player in the other team, given the first-attack team.
     pub fn opponent(self, first_attack_team: TeamIndex) -> Self {
         let opponent_value = match first_attack_team {
             TeamIndex::Team1 => if self.0 < 2 { 3 - self.0 } else { self.0 - 2 },
@@ -73,16 +86,23 @@ impl PlayerIndex {
     }
 }
 
+/// A 2v2 tag duel.
 #[repr(C)]
 pub struct TagDuel {
+    /// The base duel.
     pub duel: Duel,
+    /// The first-attack team.
     pub first_attack_team: Option<TeamIndex>,
+    /// The winners of each finished duel.
     pub duel_winner: Vec<Option<TeamIndex>>,
+    /// The player whose turn it currently is.
     pub current_turn_player: Option<PlayerIndex>,
+    /// Whether each player has surrendered.
     pub surrender: [bool; 4],
 }
 
 impl TagDuel {
+    /// Create a tag duel from a [`HostInfo`] and [`struct@Configuration`].
     pub fn new(host_info: HostInfo, configuration: Configuration) -> Self {
         Self {
             duel: Duel::new(host_info, configuration),
@@ -111,6 +131,7 @@ impl TagDuel {
         (returned_duel, request, returned_states, response)
     }
 
+    /// Start the tag duel as an actor model.
     pub fn run(mut self) -> Option<tokio::task::JoinHandle<()>> {
         let receiver = self.request_receiver.take()?;
         let mut stream = UnboundedReceiverStream::new(receiver);
@@ -230,6 +251,7 @@ impl TagDuel {
         Some(handle)
     }
 
+    /// Create a replay, filling all fields except the data part.
     pub fn create_replay_without_data(&self) -> Option<Replay> {
         let host_player = self.players[0].as_ref()?;
         let tag_host_player = self.players[1].as_ref()?;
@@ -276,6 +298,7 @@ impl TagDuel {
         Some(replay)
     }
 
+    /// Set a player as waiting for a select-message response.
     pub fn set_waiting(&mut self, player: CorePlayer) -> Option<()> {
         let transformer = self.player_transformer();
         let index = transformer.to_player_index(player)?;
@@ -301,10 +324,12 @@ impl TagDuel {
         Some(())
     }
 
+    /// Build a [`PlayerTransformer`] for the current duel state.
     pub fn player_transformer(&self) -> PlayerTransformer {
         PlayerTransformer::new(self.first_attack_team, self.current_turn_player)
     }
 
+    /// Rotate the turn to the next player after the given player.
     pub fn rotate_turn_player(&mut self, player: CorePlayer) {
         let first_attack_team = self.first_attack_team.unwrap_or(TeamIndex::Team1);
         let operator = if self.current_turn_player == Some(first_attack_team.leader())
@@ -363,6 +388,7 @@ const _: () = {
     assert!(std::mem::size_of::<Duel>() <= std::mem::size_of::<TagDuel>());
 };
 
+/// A transformer for [`TagDuel`] that converts [`Netplayer`] to [`CorePlayer`].
 #[derive(Clone)]
 pub struct PlayerTransformer {
     first_attack_team: TeamIndex,
@@ -370,10 +396,12 @@ pub struct PlayerTransformer {
 }
 
 impl PlayerTransformer {
+    /// Create a transformer from the first-attack team and the current turn player.
     pub fn new(first_attack_team: Option<TeamIndex>, current_turn_player: Option<PlayerIndex>) -> Self {
         Self { first_attack_team: first_attack_team.unwrap_or(TeamIndex::Team1), current_turn_player }
     }
 
+    /// Convert a [`CorePlayer`] to a [`PlayerIndex`].
     pub fn to_player_index(&self, core_player: CorePlayer) -> Option<PlayerIndex> {
         match core_player {
             CorePlayer::FirstAttackPlayer | CorePlayer::SecondAttackPlayer => {
@@ -393,6 +421,7 @@ impl PlayerTransformer {
         }
     }
 
+    /// Convert a [`TeamIndex`] to a [`CorePlayer`].
     pub fn team_to_core_player(&self, team: TeamIndex) -> CorePlayer {
         match self.first_attack_team {
             TeamIndex::Team1 => if team == TeamIndex::Team1 { CorePlayer::FirstAttackPlayer } else { CorePlayer::SecondAttackPlayer },
@@ -400,6 +429,7 @@ impl PlayerTransformer {
         }
     }
 
+    /// Convert a [`Netplayer`] to a [`CorePlayer`].
     pub fn to_core_player(&self, net_player: Netplayer) -> CorePlayer {
         let Netplayer::Player(index) = net_player else { return CorePlayer::None };
         let player = PlayerIndex(index);
@@ -441,6 +471,7 @@ impl<Req: Send, Res: Send> FromRequest<Req, State<TagDuel>, Res> for PlayerTrans
     }
 }
 
+/// ygopro handlers which only work for [`TagDuel`].
 pub mod ygopro_handlers {
     use linkme::distributed_slice;
     use log::warn;
@@ -461,13 +492,18 @@ pub mod ygopro_handlers {
     use super::TagDuel;
     use super::TeamIndex;
 
+    /// The ygopro handler for [`TagDuel`].
     pub type Handler = HandlerTemplate<TagDuel>;
+    /// The ygopro ex handler for [`TagDuel`].
     pub type HandlerEx = HandlerExTemplate<TagDuel>;
 
+    /// Name for activitating this module in the plugin system.
     #[distributed_slice(crate::plugin::DEFAULT_ENABLED_PLUGINS)]
     pub static NAME: &'static str = module_path!();
+    /// The distributed slice of [`TagDuel`]'s ygopro handlers.
     #[distributed_slice]
     pub static TAG_DUEL_YGOPRO_HANDLERS: [fn() -> (u8, Handler)];
+    /// The distributed slice of [`TagDuel`]'s ygopro ex handlers.
     #[distributed_slice]
     pub static TAG_DUEL_YGOPRO_HANDLERS_EX: [fn() -> (u8, HandlerEx)];
 
@@ -735,6 +771,7 @@ pub mod ygopro_handlers {
     }
 }
 
+/// ygocore handlers which only work for [`TagDuel`].
 pub mod ygocore_handlers {
     use linkme::distributed_slice;
     use ygopro_data::constants::*;
@@ -749,10 +786,13 @@ pub mod ygocore_handlers {
     use super::PlayerTransformer;
     use super::TagDuel;
 
+    /// The ygocore handler for [`TagDuel`].
     pub type Handler = SyncHandler<Request, State<TagDuel>, Response>;
 
+    /// Name for activitating this module in the plugin system.
     #[distributed_slice(crate::plugin::DEFAULT_ENABLED_PLUGINS)]
     pub static NAME: &'static str = module_path!();
+    /// The distributed slice of [`TagDuel`]'s ygocore handlers.
     #[distributed_slice]
     pub static TAG_DUEL_YGOCORE_HANDLERS: [fn() -> (u8, Handler)];
 

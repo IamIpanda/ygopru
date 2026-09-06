@@ -8,7 +8,7 @@ use linkme::distributed_slice;
 use log::warn;
 use ygopro_data::constants::*;
 use ygopro_data::data::DuelOptions;
-use ygopro_data::message::{ctos, stoc, gm};
+use ygopro_data::message::{ctos, stoc};
 use ygopro_handler::extract::{ContainsMap, ContainsMapMut};
 use ygopro_handler::*;
 use ygopro_handler::sync_handler::SyncHandler;
@@ -22,17 +22,27 @@ use crate::player::AllowMessage;
 #[distributed_slice(crate::plugin::DEFAULT_ENABLED_PLUGINS)]
 pub static NAME: &'static str = module_path!();
 
+/// The ygopro request, carrying a [`ctos::Message`] and the sender's [`Netplayer`].
 pub type Request = ygopro_handler::extract::Request<ctos::Message, Netplayer>; 
+/// The ygopro ex request, carrying an internal [`Message`](crate::message::Message) and a [`SendTarget`].
 pub type RequestEx = ygopro_handler::extract::Request<crate::message::Message, SendTarget>;
+/// The ygopro response, carrying a [`stoc::Message`].
 pub type Response = ygopro_handler::extract::Response<stoc::Message>;
+/// The ygopro handler template for a duel state.
 pub type HandlerTemplate<Duel> = SyncHandler<Request, State<Duel>, Response>;
+/// The ygopro ex handler template for a duel state.
 pub type HandlerExTemplate<Duel> = SyncHandler<RequestEx, State<Duel>, Response>;
+/// The ygopro handler for [`Duel`].
 pub type Handler = HandlerTemplate<Duel>;
+/// The ygopro ex handler for [`Duel`].
 pub type HandlerEx = HandlerExTemplate<Duel>;
 
+/// The state passed through the handler chain: a type-erased map plus the duel.
 #[repr(C)]
 pub struct State<Duel: 'static> {
+    /// The type-erased state map.
     pub states: anymap3::Map<dyn std::any::Any + Send>,
+    /// The duel being processed.
     pub duel: Duel,
 }
 
@@ -96,8 +106,10 @@ impl<Res, TDuel> FromRequest<Request, State<TDuel>, Res> for PlayerIndex where R
     }
 }
 
+/// The distributed slice of ygopro handlers.
 #[distributed_slice]
 pub static YGOPRO_HANDLERS: [fn() -> (u8, Handler)];
+/// The distributed slice of ygopro ex handlers.
 #[distributed_slice]
 pub static YGOPRO_HANDLERS_EX: [fn() -> (u8, HandlerEx)];
 

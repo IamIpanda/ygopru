@@ -1,3 +1,7 @@
+//! The single-duel room.
+//!
+//! [`SingleDuel`] drives a single (or match) duel in the actor model.
+
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -25,10 +29,17 @@ use crate::duel::Request;
 use crate::duel::SendTarget;
 use crate::ygopro_handlers::State;
 
+/// Duel instances which process [`Mode::Match`] and [`Mode::Single`].
+///
+/// Dirrerent with C++ version, SingleDuel don't do swap during the first attack decided.
+/// We use [`PlayerTransformer`] to process gap between [`Netplayer`] and [`CorePlayer`].
 #[repr(C)]
 pub struct SingleDuel {
+    /// Base duel
     pub duel: Duel,
+    /// First attack player slot index.
     pub first_attack_player: Option<PlayerIndex>,
+    /// Recorder for who won the duel.
     pub duel_winner: Vec<Option<PlayerIndex>>
 }
 
@@ -59,6 +70,7 @@ impl SingleDuel {
         (returned_duel, request, returned_states, response)
     }
 
+    /// Start SingleDuel as an actor model.
     pub fn run(mut self) -> Option<tokio::task::JoinHandle<()>> {
         let receiver = self.request_receiver.take()?;
         let mut stream = UnboundedReceiverStream::new(receiver);
@@ -178,6 +190,9 @@ impl SingleDuel {
         Some(handle)
     }
 
+    /// create a replay, fill all fields except the data part.
+    /// 
+    /// Can't put into [`Duel`] because First attack player always put in first.
     pub fn create_replay_without_data(&self) -> Option<Replay> {
         let (host_player, client_player) = match self.first_attack_player? {
             PlayerIndex::Player1 => ( self.players[0].as_ref()?, self.players[1].as_ref()? ),
@@ -225,7 +240,7 @@ impl SingleDuel {
         Some(replay)
     }
 
-    
+    /// Set a player as waiting for select message response.
     pub fn set_waiting(&mut self, player: CorePlayer) -> Option<()> {
         let transformer = PlayerTransformer(self.first_attack_player.unwrap_or(PlayerIndex::Player1));
         let index = match transformer.to_player_index(player) {
@@ -299,6 +314,7 @@ const _: () = {
     assert!(std::mem::size_of::<Duel>() <= std::mem::size_of::<SingleDuel>());
 };
 
+/// A Transformer for SingleDuel that transform [`Netplayer`] into [`CorePlayer`].
 #[derive(Clone)]
 pub struct PlayerTransformer(PlayerIndex);
 impl CorePlayerToSendTarget for PlayerTransformer {
@@ -342,6 +358,7 @@ impl PlayerConverter for PlayerTransformer {
 }
 
 impl PlayerTransformer {
+    /// Transform ['CorePlayer'] into ["PlayerIndex"].
     pub fn to_player_index(&self, core_player: CorePlayer) -> Option<PlayerIndex> {
         let core_player = match self.0 {
             PlayerIndex::Player1 => core_player,
@@ -361,7 +378,7 @@ impl<Req: Send, Res: Send> FromRequest<Req, State<SingleDuel>, Res> for PlayerTr
     }
 }
 
-
+/// ygopro handlers which only work for [`SingleDuel`].
 pub mod ygopro_handlers {
     use linkme::distributed_slice;
     use log::warn;
@@ -379,12 +396,17 @@ pub mod ygopro_handlers {
     use super::PlayerTransformer;
     use super::SingleDuel;
 
+    /// The ygopro handler for [`SingleDuel`].
     pub type Handler = HandlerTemplate<super::SingleDuel>;
+    /// The ygopro ex handler for [`SingleDuel`].
     pub type HandlerEx = HandlerExTemplate<super::SingleDuel>;
+    /// Name for activitating this module in the plugin system. 
     #[distributed_slice(crate::plugin::DEFAULT_ENABLED_PLUGINS)]
     pub static NAME: &'static str = module_path!();
+    /// The distributed slice of [`SingleDuel`]'s ygopro handlers.
     #[distributed_slice]
     pub static SINGLE_DUEL_YGOPRO_HANDLERS: [fn() -> (u8, Handler)];
+    /// The distributed slice of [`SingleDuel`]'s ygopro ex handlers.
     #[distributed_slice]
     pub static SINGLE_DUEL_YGOPRO_HANDLERS_EX: [fn() -> (u8, HandlerEx)];
 
@@ -541,6 +563,7 @@ pub mod ygopro_handlers {
     }
 }
 
+/// ygocore handlers which only work for [`SingleDuel`].
 pub mod ygocore_handlers {
     use linkme::distributed_slice;
 
@@ -556,10 +579,13 @@ pub mod ygocore_handlers {
 
     use super::PlayerTransformer;
     
+    /// The ygocore handler for [`SingleDuel`].
     pub type Handler = SyncHandler<Request, State<SingleDuel>, Response>;
 
+    /// Name for activitating this module in the plugin system.
     #[distributed_slice(crate::plugin::DEFAULT_ENABLED_PLUGINS)]
     pub static NAME: &'static str = module_path!();
+    /// The distributed slice of [`SingleDuel`]'s ygocore handlers.
     #[distributed_slice]
     pub static SINGLE_DUEL_YGOCORE_HANDLERS: [fn() -> (u8, Handler)];
 

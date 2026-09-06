@@ -31,7 +31,8 @@ use crate::ygopro_handlers;
 pub type Request = ygopro_handler::extract::Request<gm::Message, Netplayer>; 
 /// The state type for ygocore handlers, which is the [`Duel`] state.
 /// 
-/// If you need [`SingleDuel`] or [`TagDuel`], register to the corresponding one.
+/// If you need [`SingleDuel`](crate::single_duel::SingleDuel) or
+/// [`TagDuel`](crate::tag_duel::TagDuel), register to the corresponding one.
 pub type State = ygopro_handlers::State<crate::duel::Duel>;
 /// The handler type for ygocore handlers.
 pub type Handler = ygopro_handler::sync_handler::SyncHandler<Request, State, Response>;

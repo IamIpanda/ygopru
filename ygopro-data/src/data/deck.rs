@@ -1,3 +1,7 @@
+//! A deck of cards.
+//!
+//! Provides the [`Deck`] container and the deck-parsing logic.
+
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -22,6 +26,7 @@ const DECK_MAX: usize = 60;
 const EXTRA_MAX: usize = 15;
 const SIDE_MAX: usize = 15;
 
+/// Player Deck.
 #[binrw]
 #[derive(Debug, Clone, Default)]
 pub struct Deck {
@@ -38,8 +43,10 @@ pub struct Deck {
 }
 
 impl Deck {
+    /// Create an empty deck.
     pub fn new() -> Self { Self::default() }
 
+    /// Build a deck from raw card codes, splitting into main and side.
     pub fn load_from_codes(codes: &[u32], mainc: usize, sidec: usize) -> Self {
         let mut d = Self::new();
         let mc = mainc.min(codes.len());
@@ -49,6 +56,7 @@ impl Deck {
         d
     }
 
+    /// Count each card code across main, extra, and side.
     pub fn get_hash(&self) -> HashMap<u32, usize> {
         let mut counts: HashMap<u32, usize> = HashMap::new();
         for &code in self.main.iter().chain(self.extra.iter()).chain(self.side.iter()) {
@@ -57,6 +65,7 @@ impl Deck {
         counts 
     }
 
+    /// Drop unknown/token cards and move extra-deck cards into the extra.
     pub fn load<'a>(&mut self, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Option<DeckError> {
         let response = remove_unknown_cards(&mut self.main, |c| resolve_card(c).map(|c| c.card_type))
             .or(remove_unknown_cards(&mut self.side, |c| resolve_card(c).map(|c| c.card_type)));
@@ -64,6 +73,7 @@ impl Deck {
         response
     }
 
+    /// Check the deck against the limit list and the rule.
     pub fn prepare<'a>(&mut self, lflist: &LFList, rule: Rule, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Result<(), DeckError> {
         self.check(lflist, rule, 
             |c| resolve_card(c).map(|c| c.ot).unwrap_or(OT::empty()), 
@@ -71,6 +81,7 @@ impl Deck {
             |c| resolve_card(c).map(|c| c.duel_code()).unwrap_or(0))
     }
 
+    /// Check a deck after replacing side, comparing against this deck.
     pub fn check_after_replacing_side<'a>(&self, deck: &mut Deck, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Result<(), DeckError> {
         deck.separate(|c| resolve_card(c).map(|c| c.card_type).unwrap_or(Type::empty()));
         if self == deck {
@@ -80,10 +91,12 @@ impl Deck {
         }
     }
 
+    /// Move extra-deck cards from main into the extra.
     pub fn separate(&mut self, resolve_type: impl Fn(u32) -> Type) {
         separate_main_and_extra(&mut self.main, &mut self.extra, resolve_type);
     }
 
+    /// Run all the deck checks (length, illegal cards, rule, limit list).
     pub fn check(&self, lflist: &LFList, rule: Rule, get_rule: impl Fn(u32) -> OT, get_type: impl Fn(u32) -> Type, resolve_code: impl Fn(u32) -> u32) -> Result<(), DeckError> {
         check_deck_length(&self.main, &self.extra, &self.side)?;
         check_illegal_cards(&self.main, &self.side, &self.extra, get_type)?;
@@ -158,28 +171,41 @@ impl PartialEq for Deck {
 
 impl Eq for Deck {}
 
+/// The kind of deck error.
 #[derive(Specifier, Clone, Copy, Debug, IntoPrimitive, TryFromPrimitive, PartialEq, Eq)]
 #[bits = 4]
 #[repr(u8)]
 pub enum DeckErrorType {
+    /// Violates the limit list.
     Lflist = 0x1,
+    /// Contains card only available in OCG.
     OcgOnly = 0x2,
+    /// Contains card only available in TCG.
     TcgOnly = 0x3,
+    /// Contains unknown card.
     UnknownCard = 0x4,
+    /// Too many copies of a card.
     CardCount = 0x5,
+    /// The main deck size is wrong.
     MainCount = 0x6,
+    /// The extra deck size is wrong.
     ExtraCount = 0x7,
+    /// The side deck size is wrong.
     SideCount = 0x8,
+    /// A card is not available.
     NotAvailable = 0x9,
 }
 
+/// A deck error, packing an error type and the offending card code.
 #[bitfield]
 #[derive(BinRead, BinWrite, Debug, Clone, Copy, PartialEq, Eq)]
 #[br(map = Self::from_bytes)]
 #[bw(map = |&x| Self::into_bytes(x))]
 #[repr(u32)]
 pub struct DeckError {
+    /// The offending card code.
     pub code: modular_bitfield::specifiers::B28,
+    /// The error type.
     pub error_type: DeckErrorType,
 }
 
@@ -193,6 +219,7 @@ impl std::error::Error for DeckError {}
 
 const EXTRA_TYPE: Type = Type::from_bits_retain(0x4802040);
 
+/// Move extra-deck cards from `main` into `ex`.
 pub fn separate_main_and_extra(main: &mut Vec<u32>, ex: &mut Vec<u32>, resolve_type: impl Fn(u32) -> Type) {
     main.retain(|&code| {
         if resolve_type(code).intersects(EXTRA_TYPE) {
@@ -204,6 +231,7 @@ pub fn separate_main_and_extra(main: &mut Vec<u32>, ex: &mut Vec<u32>, resolve_t
     });
 }
 
+/// Check the main, extra, and side deck sizes.
 pub fn check_deck_length(main: &[u32], extra: &[u32], side: &[u32]) -> Result<(),DeckError> {
     if main.len() < DECK_MIN || main.len() > DECK_MAX { return Err(DeckError::new().with_error_type(DeckErrorType::MainCount).with_code(main.len() as u32)); }
     if extra.len() > EXTRA_MAX { return Err(DeckError::new().with_error_type(DeckErrorType::ExtraCount).with_code(extra.len() as u32)); }
@@ -211,6 +239,7 @@ pub fn check_deck_length(main: &[u32], extra: &[u32], side: &[u32]) -> Result<()
     Ok(())
 }
 
+/// Remove unknown or token cards, returning an error for the last removed card.
 pub fn remove_unknown_cards(main: &mut Vec<u32>, get_type: impl Fn(u32) -> Option<Type>) -> Option<DeckError> {
     let mut last_removed_code = None;
     main.retain(|code| {
@@ -226,6 +255,7 @@ pub fn remove_unknown_cards(main: &mut Vec<u32>, get_type: impl Fn(u32) -> Optio
     last_removed_code.map(|code| DeckError::new().with_error_type(DeckErrorType::UnknownCard).with_code(code))
 }
 
+/// Check that no illegal card (token, or a card in the wrong section) is present.
 pub fn check_illegal_cards(main: &Vec<u32>, side: &Vec<u32>, ex: &Vec<u32>, get_type: impl Fn(u32) -> Type) -> Result<(), DeckError> {
     for code in main {
         let card_type = get_type(*code);
@@ -247,6 +277,7 @@ pub fn check_illegal_cards(main: &Vec<u32>, side: &Vec<u32>, ex: &Vec<u32>, get_
     Ok(())
 }
 
+/// Check that every card is allowed by the rule's availability.
 pub fn check_rule<'a>(codes: impl Iterator<Item = &'a u32>, rule: Rule, get_rule: impl Fn(u32) -> OT) -> Result<(), DeckError> {
     for &code in codes {
         let ot = get_rule(code);
@@ -257,6 +288,7 @@ pub fn check_rule<'a>(codes: impl Iterator<Item = &'a u32>, rule: Rule, get_rule
     Ok(())
 }
 
+/// Check the card counts against the limit list.
 pub fn check_deck_lflists<'a>(codes: impl Iterator<Item = &'a u32>, lflist: &LFList, resolve_code: impl Fn(u32) -> u32) -> Result<(), DeckError> {
     let mut counts: HashMap<u32, u32> = HashMap::new();
     for &code in codes {

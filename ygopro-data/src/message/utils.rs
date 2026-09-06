@@ -1,3 +1,8 @@
+//! Message traits and shared types.
+//!
+//! Provides the [`PureMessage`] / [`Message`] traits, the [`HostInfo`] struct, and the
+//! message [`Error`] type.
+
 use std::fmt::Debug;
 use binrw::BinRead;
 use binrw::BinWrite;

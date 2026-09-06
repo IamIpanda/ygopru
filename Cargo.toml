@@ -1,32 +1,16 @@
-[package]
-name = "ygopru"
-version = "0.1.0"
+[workspace.package]
 edition = "2024"
+license-file = "LICENSE"
+repository = "https://github.com/iamipanda/ygopru"
+description = "A Rust rewrite of the YGOPro duel server."
 
-[dependencies]
+[workspace.dependencies]
 ygopro = { path = "./ygopro", default-features = false }
-ygopro-data.workspace = true
+ygopro-data = { path = "./ygopro-data", default-features = false }
 ygopro-handler = { path = "./ygopro-handler", default-features = false }
 ygopro-core-wrapper = { path = "./ygopro-core-wrapper", default-features = false }
 ygopro-derive = { path = "./ygopro-derive" }
 ygopro-external-server-bridge = { path = "./ygopro-external-server-bridge", default-features = false }
-
-[workspace.dependencies]
-ygopro-data = { path = "./ygopro-data", default-features = false }
-
-[features]
-default = [
-    "zip",
-    "card"
-]
-zip = ["ygopro/zip"]
-card = [
-    "ygopro/card",
-    "ygopro-core-wrapper/card",
-    "ygopro-data/card",
-    "ygopro-external-server-bridge/card",
-    "ygopro-handler/card",
-]
 
 [workspace]
 default-members = ["ygopro"]
@@ -40,3 +24,8 @@ members = [
     "ygopro-toolkits",
     "ygopro-external-server-bridge"
 ]
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 'z'

@@ -1,6 +1,7 @@
 //! Replay validation. Drives a replay through either the in-process
-//! [`SingleDuel`] engine or an external ygopro-server binary bridged by
-//! [`YgoproBinaryProvider`]. Both backends speak
+//! [`SingleDuel`](ygopro::single_duel::SingleDuel) engine or an external ygopro-server
+//! binary bridged by
+//! [`YgoproBinaryProvider`](ygopro_external_server_bridge::YgoproBinaryProvider). Both backends speak
 //! `RoomProvider<ctos::Message, Complex<stoc::Message>>`, so the driving logic
 //! below is shared and only the room construction differs.
 

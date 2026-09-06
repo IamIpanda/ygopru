@@ -1,3 +1,8 @@
+//! Loading of the `strings.conf` localization file.
+//!
+//! Provides [`load_strings_conf`], which parses the conf into a category → id → string
+//! map.
+
 use std::collections::HashMap;
 use std::fs;
 

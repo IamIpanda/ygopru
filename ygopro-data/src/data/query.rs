@@ -1,3 +1,8 @@
+//! Card-position and query structures used by game messages.
+//!
+//! Provides [`CardPosition`] and [`InfoLocation`], which describe where a card sits on
+//! the field.
+
 use std::io::prelude::Read;
 use std::io::prelude::Write;
 use std::io::prelude::Seek;

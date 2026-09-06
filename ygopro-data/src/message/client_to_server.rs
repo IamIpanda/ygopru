@@ -1,3 +1,7 @@
+//! Client-to-server messages (`ctos`).
+//!
+//! Messages sent from the client to the server.
+
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 

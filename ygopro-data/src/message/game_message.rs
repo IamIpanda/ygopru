@@ -1,3 +1,7 @@
+//! ygocore game messages (`gm`).
+//!
+//! Messages emitted by the ygocore engine during a duel.
+
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 

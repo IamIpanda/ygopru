@@ -350,6 +350,58 @@ impl From<u8> for PlayerIndex {
 }
 
 /// Basic Duel container.
+///
+/// `Duel` works in the actor model. In theory it is a
+/// [`RoomProvider`](ygopro_handler::RoomProvider): it takes a stream of
+/// [`ctos::Message`] and returns a stream of
+/// [`stoc::Message`]. In practice the input type is
+/// [`ygopro_handlers::Request`], so custom control messages can be inserted alongside the
+/// wire messages.
+///
+/// Every input `ctos::Message` is handled by a function in the `ygopro_handlers` module,
+/// registered into [`ygopro_handlers::YGOPRO_HANDLERS`]. Registering a new function there
+/// controls how a message is processed. In principle, the `stoc` message that directly
+/// answers an input `ctos` message should be returned via
+/// [`Response::Replace`](ygopro_handler::extract::Response::Replace) /
+/// [`Response::ReplaceMultiple`](ygopro_handler::extract::Response::ReplaceMultiple),
+/// while a message caused by another player's action is sent directly through [`Sender`].
+/// In practice the returned message gets no further processing or hook, so there is no
+/// difference.
+///
+/// `Duel` advances the internal ygocore state via [`Request::Evolve`]; sending a
+/// [`ctos::Response`] triggers it automatically.
+/// Once the core returns its messages, they are routed through
+/// [`ygocore_handlers::YGOCORE_HANDLERS`](crate::ygocore_handlers::YGOCORE_HANDLERS), which also sends the refresh messages and sets
+/// the message gate. Registering a function into that distributed slice controls this
+/// behavior.
+///
+/// Duel does its best to keep the binary message protocol and its timing identical to ygopro. 
+/// But for extensibility and implementation details, some messages differ from the original:
+/// - A [`CreateGame`](ygopro_data::message::ctos::CreateGame) message is sent to the duel
+///   when it is created. It does not exist in the original ygopro; it initializes the duel
+///   data.
+/// - The `ygocore` duel is created when the room is created
+///   ([`DuelHost::new`](crate::host::DuelHost::new)), unlike the original which creates it
+///   in [`TpResult`](ygopro_data::message::ctos::TpResult).
+/// - When a network player leaves, a [`LeaveGame`](ygopro_data::message::ctos::LeaveGame)
+///   message is sent to the duel. It does not exist in the original ygopro; it lets plugins
+///   catch that moment.
+/// 
+/// At the start and the end of a duel, `Duel` triggers a chain of its own message type
+/// [`ygopro::Message`](crate::message::Message), so plugins can modify these behaviors.
+/// See [`message`](crate::message).
+///
+/// `Duel` does not handle the conversions between [`Netplayer`] and [`CorePlayer`], nor
+/// between [`PlayerIndex`] and [`SendTarget`]; those belong to its
+/// subclasses ([`SingleDuel`](crate::single_duel::SingleDuel),
+/// [`TagDuel`](crate::tag_duel::TagDuel)). This means some behavior cannot be handled at
+/// the `Duel` level, so certain plugins have to register two functions, one into
+/// [`SINGLE_DUEL_YGOPRO_HANDLERS`](crate::single_duel::ygopro_handlers::SINGLE_DUEL_YGOPRO_HANDLERS)
+/// and one into
+/// [`TAG_DUEL_YGOPRO_HANDLERS`](crate::tag_duel::ygopro_handlers::TAG_DUEL_YGOPRO_HANDLERS).
+/// These handler functions are mixed together in the same
+/// [`Processor`](ygopro_handler::Processor).
+///
 pub struct Duel {
     /// Internal ygocore duel instance.
     pub core: core::Duel,

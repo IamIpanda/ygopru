@@ -1,3 +1,8 @@
+//! ypk file manager.
+
+/// Extra manager for processing zip (`.ypk`) files.
+///
+/// It scans the `./expansions` folder and lets cards/scripts be read from the archives.
 pub mod archive_manager {
     use std::fs;
     use std::io::Read;
@@ -15,6 +20,8 @@ pub mod archive_manager {
 
     static GLOBAL_ARCHIVES: LazyLock<ArcSwap<Vec<ExpansionArchive>>> = LazyLock::new(|| ArcSwap::from_pointee(Vec::new()));
 
+    // Scan `./expansions` folder and remember them.
+    /// Scan the `./expansions` folder and remember the archives.
     pub fn init() {
         let mut expansion_archives = Vec::new();
         let entries = if let Ok(entries) = fs::read_dir("./expansions") {
@@ -44,6 +51,7 @@ pub mod archive_manager {
         GLOBAL_ARCHIVES.store(Arc::new(expansion_archives));
     }
 
+    /// Read a file by name from the remembered archives.
     pub fn read_from_archives(name: &str) -> Option<Vec<u8>> {
         let guard = GLOBAL_ARCHIVES.load();
         for expansion_archive in guard.iter() {
@@ -58,6 +66,7 @@ pub mod archive_manager {
         None
     }
 
+    /// Read a file from disk, falling back to the archives.
     #[cfg(feature = "card")]
     pub fn read_file(name: &str) -> Option<Vec<u8>> {
         match fs::read(name) {
@@ -66,6 +75,7 @@ pub mod archive_manager {
         }
     }
 
+    /// List the `.cdb` file names across the archives.
     #[cfg(feature = "card")]
     pub fn cdb_names() -> Vec<String> {
         let guard = GLOBAL_ARCHIVES.load();

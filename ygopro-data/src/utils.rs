@@ -226,7 +226,7 @@ pub mod complex {
 
     /// A lazy-deserialized message.
     ///
-    /// It holds the raw wire bytes (`data`) and only parses them into a [`Message`] on
+    /// It holds the raw wire bytes (`data`) and only parses them into a `Message` on
     /// first access, caching the result in a [`OnceLock`]. When written out, [`BinWrite`]
     /// emits the original raw bytes and never re-serializes.
     ///

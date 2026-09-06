@@ -211,7 +211,7 @@ where
         resolve_globals(&mut self.handlers, &self.global_handlers, |h| h.priority());
     }
 
-    /// Run a bundle through the handler chain for the given key, stopping on [`StopFlag`].
+    /// Run a bundle through the handler chain for the given key, stopping on [`StopFlag`](crate::handler::StopFlag).
     pub async fn process_bundle(&self, bundle: Bundle<Req, State, Res>, key: Key) -> Bundle<Req, State, Res>
     where
         Key: Eq + Hash,
@@ -269,13 +269,16 @@ where
     /// The source handlers are written against `SubState` but run against `Target`. This is
     /// only sound for [`SyncHandler`], whose `Call` impl reinterprets
     /// `&mut Bundle<Req, Target, Res>` as `&mut Bundle<Req, SubState, Res>` via the
-    /// [`handler::sync_handler::WithSubState`] layout guarantee.
+    /// [`WithSubState`] layout guarantee.
     ///
-    /// [`TowerHandler`] and [`AsyncHandler`] erase the handler behind a trait object
-    /// (`BoxCloneService` / `Arc<dyn Call>`), so they cannot be transmuted between state
-    /// types; the dual-state trick is unique to `SyncHandler`, which stores raw pointers
-    /// and monomorphized function pointers. The layout assumption is checked by
-    /// [`handler::sync_handler::assert_sync_handler_layout`] in [`extend`](Self::extend).
+    /// [`TowerHandler`](crate::handler::tower_handler::TowerHandler) and
+    /// [`AsyncHandler`](crate::handler::async_handler::AsyncHandler) erase the handler
+    /// behind a trait object (`BoxCloneService` / `Arc<dyn Call>`), so they cannot be
+    /// transmuted between state types; the dual-state trick is unique to `SyncHandler`,
+    /// which stores raw pointers and monomorphized function pointers. The layout
+    /// assumption is checked by
+    /// [`assert_sync_handler_layout`](crate::handler::sync_handler::assert_sync_handler_layout)
+    /// in [`extend`](Processor::extend).
     pub fn new_with_dual_group<SubState>(
         target_builders: &[fn() -> (Key, SyncHandler<Req, Target, Res>)],
         source_builders: &[fn() -> (Key, SyncHandler<Req, SubState, Res>)],
@@ -308,8 +311,9 @@ where
     /// Merge the handlers of a source-state processor into this target-state processor.
     ///
     /// Each source handler is transmuted to run against `Target`. This assumes the
-    /// [`handler::sync_handler::WithSubState`] layout guarantee and is checked by
-    /// [`handler::sync_handler::assert_sync_handler_layout`].
+    /// [`WithSubState`] layout guarantee and is
+    /// checked by
+    /// [`assert_sync_handler_layout`](crate::handler::sync_handler::assert_sync_handler_layout).
     pub fn extend<SubState>(&mut self, processor_source: Processor<Key, Req, SubState, Res, SyncHandler<Req, SubState, Res>>)
     where
         SubState: Send + 'static,

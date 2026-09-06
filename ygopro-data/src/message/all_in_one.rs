@@ -1,3 +1,8 @@
+//! A unified message type covering all directions.
+//!
+//! Provides [`Direction`], [`MessageType`] and [`Message`], which wrap the ctos/stoc/gm
+//! messages together.
+
 use crate::message::client_to_server;
 use crate::message::server_to_client;
 use crate::message::game_message;

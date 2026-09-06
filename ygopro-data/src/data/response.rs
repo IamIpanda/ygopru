@@ -1,3 +1,7 @@
+//! A player's response to a select prompt.
+//!
+//! Provides the [`Response`] enum and its command enums ([`IdleCommand`], [`BattleCommand`]).
+
 use binrw::BinRead;
 use binrw::BinWrite;
 use binrw::VecArgs;
@@ -10,6 +14,7 @@ use binrw::io::Write;
 use crate::constants::*;
 use crate::message::gm;
 
+/// The idle-phase command a player picks, answered to a `SelectIdleCommand` message.
 #[derive(BinRead, BinWrite, Debug, Clone, Copy, PartialEq, Eq)]
 #[brw(repr = u16)]
 #[repr(u16)]
@@ -25,6 +30,7 @@ pub enum IdleCommand {
     ShuffleDeck = 8,
 }
 
+/// The battle-phase command a player picks, answered to a `SelectBattleCommand` message.
 #[derive(BinRead, BinWrite, Debug, Clone, Copy, PartialEq, Eq)]
 #[brw(repr = u16)]
 #[repr(u16)]
@@ -35,28 +41,60 @@ pub enum BattleCommand {
     EnterEndPhase = 3,
 }
 
+/// A player's response to a select prompt.
+///
+/// Each variant answers a particular [`gm::MessageType`](crate::message::gm::MessageType):
+/// the response is only meaningful together with the `GameMessage` that prompted it.
+/// `Unknown` holds the raw bytes when the prompting message type is not known.
 #[derive(Debug, Clone)]
 pub enum Response {
+    /// Answers [`SelectCard`](crate::message::gm::MessageType::SelectCard) /
+    /// [`SelectUnselectCard`](crate::message::gm::MessageType::SelectUnselectCard) /
+    /// [`SelectTribute`](crate::message::gm::MessageType::SelectTribute), meaning decline.
     Cancel,
+    /// Answers [`SelectIdleCommand`](crate::message::gm::MessageType::SelectIdleCommand).
     SelectIdleCommand(IdleCommand, u16),
+    /// Answers [`SelectBattleCommand`](crate::message::gm::MessageType::SelectBattleCommand).
     SelectBattleCommand(BattleCommand, u16),
+    /// Answers [`SelectYesNo`](crate::message::gm::MessageType::SelectYesNo) /
+    /// [`SelectEffectYesNo`](crate::message::gm::MessageType::SelectEffectYesNo).
     SelectYesNo(bool),
+    /// Answers [`SelectOption`](crate::message::gm::MessageType::SelectOption) /
+    /// [`AnnounceNumber`](crate::message::gm::MessageType::AnnounceNumber).
     SelectOption(u8),
+    /// Answers [`SelectChain`](crate::message::gm::MessageType::SelectChain).
     SelectChain(u8),
+    /// Answers [`SelectChain`](crate::message::gm::MessageType::SelectChain), meaning decline.
     DeclineChain,
+    /// Answers [`SelectPosition`](crate::message::gm::MessageType::SelectPosition).
     SelectPosition(Position),
+    /// Answers [`SelectCard`](crate::message::gm::MessageType::SelectCard).
     SelectCards(Vec<u16>),
+    /// Answers [`SelectUnselectCard`](crate::message::gm::MessageType::SelectUnselectCard).
     SelectUnselectCards(u16),
+    /// Answers [`SelectTribute`](crate::message::gm::MessageType::SelectTribute).
     SelectTribute(Vec<u16>),
+    /// Answers [`SelectSum`](crate::message::gm::MessageType::SelectSum).
     SelectSum(Vec<u16>),
+    /// Answers [`SelectCounter`](crate::message::gm::MessageType::SelectCounter).
     SelectCounter(Vec<u16>),
+    /// Answers [`SelectPlace`](crate::message::gm::MessageType::SelectPlace) /
+    /// [`SelectDisableField`](crate::message::gm::MessageType::SelectDisableField).
     SelectPlace(CorePlayer, Location, u8),
+    /// Answers [`SelectPlace`](crate::message::gm::MessageType::SelectPlace) /
+    /// [`SelectDisableField`](crate::message::gm::MessageType::SelectDisableField), meaning decline.
     DeclinePlace,
+    /// Answers [`SortCard`](crate::message::gm::MessageType::SortCard).
     SortCards(Vec<u16>),
+    /// Answers [`SortCard`](crate::message::gm::MessageType::SortCard), meaning keep the card order.
     KeepCardOrder,
+    /// Answers [`AnnounceRace`](crate::message::gm::MessageType::AnnounceRace).
     AnnounceRace(Race),
+    /// Answers [`AnnounceAttribute`](crate::message::gm::MessageType::AnnounceAttribute).
     AnnounceAttribute(Attribute),
+    /// Answers [`AnnounceCard`](crate::message::gm::MessageType::AnnounceCard).
     AnnounceCard(u32),
+    /// Raw bytes, when the prompting message type is unknown.
     Unknown(Vec<u8>),
 }
 

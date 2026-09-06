@@ -29,6 +29,7 @@ use managers::*;
 
 #[macro_use] extern crate ygopro_derive;
 
+/// Initialize the global [`managers`] and the ygocore callbacks.
 pub fn init() {
     managers::config_manager::init();
     managers::i18n::init();
@@ -39,6 +40,10 @@ pub fn init() {
     init_core();
 }
 
+/// Set the ygocore callbacks
+/// ([`set_script_reader`](ygopro_core_wrapper::set_script_reader),
+/// [`set_card_reader`](ygopro_core_wrapper::set_card_reader),
+/// [`set_message_handler`](ygopro_core_wrapper::set_message_handler)).
 pub fn init_core() {
     unsafe {
         ygopro_core_wrapper::set_script_reader(Some(data_manager::script_reader));

@@ -1,3 +1,7 @@
+//! The forbidden/limited list (limit list).
+//!
+//! Provides [`LFList`], which holds the card restrictions and computes the list hash.
+
 use std::collections::HashMap;
 
 const HASH_INITIAL_VALUE: u32 = 0x7dfcee6a;

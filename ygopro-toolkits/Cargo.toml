@@ -1,7 +1,12 @@
 [package]
 name = "ygopro-toolkits"
-version = "0.1.0"
-edition = "2024"
+version = "0.1.1"
+edition.workspace = true
+publish = false
+license-file.workspace = true
+repository.workspace = true
+description = "CLI tools for the YGOPro server: replay validation and duel setup."
+keywords = ["ygopro"]
 
 [[bin]]
 name = "ygopro-toolkits"
@@ -22,10 +27,10 @@ pretty_env_logger = "0.5"
 thiserror = "1"
 
 ygopro-data.workspace = true
-ygopro = { path = "../ygopro", default-features = false }
-ygopro-core-wrapper = { path = "../ygopro-core-wrapper", default-features = false }
-ygopro-handler = { path = "../ygopro-handler", default-features = false }
-ygopro-external-server-bridge = { path = "../ygopro-external-server-bridge", default-features = false }
+ygopro.workspace = true
+ygopro-core-wrapper.workspace = true
+ygopro-handler.workspace = true
+ygopro-external-server-bridge.workspace = true
 
 [features]
 default = ["card", "zip"]
@@ -34,6 +39,5 @@ card = [
     "ygopro-core-wrapper/card",
     "ygopro-data/card",
     "ygopro-external-server-bridge/card",
-    "ygopro-handler/card",
 ]
 zip = ["ygopro/zip"]

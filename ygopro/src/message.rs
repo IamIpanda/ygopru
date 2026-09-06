@@ -195,14 +195,14 @@ macro_rules! generate_enum {
         impl ygopro_data::message::PureMessage for Message {}
 
         impl Message {
-            /// Dispatch to the message's [`Next`] implementation for the [`ygopro_handler::extract::Response::Continue`] response.
+            /// Dispatch to the message's `Next` implementation for the [`ygopro_handler::extract::Response::Continue`] response.
             pub fn process_continue(self, duel: &mut Duel) {
                 match self {
                     $(Message::$message_name(_) => <$message_name as Next>::process_continue(duel)),*
                 }
             }
 
-            /// Dispatch to the message's [`Next`] implementation for the [`ygopro_handler::extract::Response::Terminate`] response.
+            /// Dispatch to the message's `Next` implementation for the [`ygopro_handler::extract::Response::Terminate`] response.
             pub fn process_terminate(self, duel: &mut Duel) {
                 match self {
                     $(Message::$message_name(_) => <$message_name as Next>::process_terminate(duel)),*
@@ -250,7 +250,7 @@ macro_rules! generate_enum {
             }
 
             impl $message_name {
-                /// Wrap this message into the [`Message`] enum.
+                /// Wrap this message into the [`enum@Message`] enum.
                 pub fn into_message(self) -> Message {
                     self.into()
                 }

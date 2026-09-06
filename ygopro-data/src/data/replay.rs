@@ -1,3 +1,8 @@
+//! Replay recording and replay files.
+//!
+//! Provides the replay header/flags and the replay (de)serialization, including
+//! lzma compression.
+
 use std::io::Cursor;
 use std::io::Read;
 use std::ops::Deref;
@@ -23,7 +28,9 @@ const SIZE_REPLAY_SEED: usize = 8;
 
 #[repr(u32)]
 pub enum ReplayVersion {
+    /// string "yrp1"
     V1 = 0x31707279,
+    /// string "yrp2"
     V2 = 0x32707279
 }
 
@@ -96,6 +103,9 @@ impl ReplayHeader {
     pub fn is_uniform(&self)    -> bool { self.flag.contains(ReplayHeaderFlags::Uniform) }
 }
 
+/// Deck saved in replay.
+/// 
+/// Replay Deck binary layout is different from [`Deck`].
 #[binrw]
 #[derive(PartialEq, Eq, Debug, Clone, Default)]
 pub struct ReplayDeck {

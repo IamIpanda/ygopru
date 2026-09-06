@@ -1,3 +1,8 @@
+//! The game data.
+//!
+//! Holds the outside game data — cards, decks, limit lists, replays — and the complicated
+//! structs used inside messages: queries and responses.
+
 mod deck;
 mod lflist;
 mod query;

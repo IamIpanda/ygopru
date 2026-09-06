@@ -1,7 +1,12 @@
 [package]
 name = "ygopro"
-version = "1.36.2-rs.1"
-edition = "2024"
+version = "0.1.2"
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+description = "A Rust rewrite of the YGOPro duel server."
+documentation = "https://docs.rs/ygopro"
+keywords = ["ygopro"]
 
 [lib]
 name = "ygopro"
@@ -24,7 +29,7 @@ base64 = "0.22"
 bytes = "1"
 log = "0.4"
 arc-swap = "1"
-hashbrown = "0.17.1"
+hashbrown = "0"
 rand = "0.8"
 linkme = "0.3"
 glob = "0.3"
@@ -32,9 +37,13 @@ slab = "0.4"
 zip = { version = "4", optional = true }
 
 ygopro-data.workspace = true
-ygopro-core-wrapper = { path = "../ygopro-core-wrapper", default-features = false }
-ygopro-handler = { path = "../ygopro-handler", default-features = false }
-ygopro-derive = { path = "../ygopro-derive" }
+ygopro-core-wrapper.workspace = true
+ygopro-handler.workspace = true
+ygopro-derive.workspace = true
+
+[build-dependencies]
+semver = "1"
+toml = "0.9"
 
 [features]
 default = ["zip", "card"]
@@ -42,10 +51,7 @@ zip = ["dep:zip"]
 card = [
     "ygopro-core-wrapper/card",
     "ygopro-data/card",
-    "ygopro-handler/card",
 ]
 
-[profile.release]
-lto = true
-strip = true
-opt-level = 'z'
+[package.metadata]
+ygopro-version = "1.36.2"

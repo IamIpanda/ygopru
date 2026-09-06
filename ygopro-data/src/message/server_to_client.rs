@@ -1,3 +1,7 @@
+//! Server-to-client messages (`stoc`).
+//!
+//! Messages sent from the server to the client.
+
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
@@ -16,7 +20,6 @@ use crate::generate_enum;
 use crate::message::game_message;
 use crate::utils::string::FixedLengthString;
 use crate::utils::string::U16String;
-
 
 use super::HostInfo;
 

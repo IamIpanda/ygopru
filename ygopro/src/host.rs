@@ -1,6 +1,6 @@
-/// Wrapper of Duel instances. 
-/// 
-/// [`DuelHost`] is a wrapper of [`Duel`] instances.
+//! Wrapper of Duel instances. 
+//! 
+//! [`DuelHost`] is a wrapper of [`Duel`](crate::duel::Duel) instances.
 
 use std::future::Future;
 use std::ops::Deref;
@@ -27,9 +27,9 @@ use crate::duel::SendTarget;
 use crate::single_duel::SingleDuel;
 use crate::tag_duel::TagDuel;
 
-/// A wrapper of SingleDuel or TagDuel.
+/// A wrapper of [`SingleDuel`] or [`TagDuel`].
 /// 
-/// DuelHost keeps a mpsc sender from Duel Instance, and implement the RoomProvider.
+/// DuelHost keeps a mpsc sender from Duel Instance, and implement the [`RoomProvider`].
 pub struct DuelHost {
     pub(crate) ctos_sender: mpsc::UnboundedSender<Request>,
     /// Get a signal that only sent once when duel ends.
