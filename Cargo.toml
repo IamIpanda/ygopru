@@ -21,6 +21,7 @@ members = [
     "ygopro-core-wrapper",
     "ygopro-handler",
     "ygopro",
+    "ygoserver",
     "ygopro-toolkits",
     "ygopro-external-server-bridge"
 ]

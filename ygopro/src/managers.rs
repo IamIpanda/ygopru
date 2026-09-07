@@ -9,6 +9,9 @@ pub mod data_manager {
     use std::ffi::c_int;
     use std::ffi::CStr;
     use std::fs;
+    use std::path::Path;
+    #[cfg(not(feature = "ygomobile_support"))]
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::LazyLock;
 
@@ -41,7 +44,7 @@ pub mod data_manager {
     pub fn init() {
         let mut data_manager = DataManager::new();
 
-        #[cfg(feature = "card")]
+        #[cfg(all(feature = "card", not(feature = "ygomobile_support")))]
         {
             let config_manager = super::config_manager::load();
             let db_path = config_manager.get("db_path").unwrap_or("cards.cdb, expansions/*.cdb").to_string();
@@ -67,6 +70,45 @@ pub mod data_manager {
                     }
                 }
             }
+        }
+        #[cfg(all(feature = "card", feature = "ygomobile_support"))]
+        {
+            use std::path::PathBuf;
+            use walkdir::WalkDir;
+
+            let path: String = super::config_manager::load()
+                .get_or("path", "./")
+                .to_string();
+            let path: &Path = Path::new(&path);
+            let db_path: PathBuf = path.join("cards.cdb");
+            let expansions_path: PathBuf = path.join("expansions");
+
+            data_manager
+                .load_db(&db_path.to_string_lossy())
+                .map(|()| log::trace!("Loaded database {}", db_path.display()))
+                .map_err(|err| {
+                    log::warn!("Failed to load database {}: {:?}", db_path.display(), err)
+                })
+                .ok();
+            WalkDir::new(expansions_path)
+                .max_depth(1)
+                .into_iter()
+                .for_each(|i| {
+                    if let Ok(i) = i {
+                        let p: &Path = i.path();
+                        if let Some(name) = p.file_name().and_then(|n| n.to_str())
+                            && name.ends_with(".cdb")
+                        {
+                            data_manager
+                                .load_db(&p.to_string_lossy())
+                                .map(|()| log::trace!("Loaded database {}", name))
+                                .map_err(|err| {
+                                    log::warn!("Failed to load database {}: {:?}", name, err)
+                                })
+                                .ok();
+                        }
+                    }
+                });
         }
         #[cfg(all(feature = "card", feature = "zip"))]
         for cdb_name in crate::ypk::archive_manager::cdb_names() {
@@ -193,7 +235,7 @@ pub mod data_manager {
     }
 
     pub extern "C" fn script_reader(script_path: *const c_char, slen: *mut c_int) -> *mut u8 {
-        fn read_file(file_path: &str, buffer: &mut Vec<u8>) -> Option<usize> {
+        fn read_file<P: AsRef<Path>>(file_path: P, buffer: &mut Vec<u8>) -> Option<usize> {
             fs::read(file_path).ok().and_then(|data| {
                 buffer.resize(data.len(), 0);
                 buffer[..data.len()].copy_from_slice(&data);
@@ -212,20 +254,43 @@ pub mod data_manager {
         if script_path.is_null() || slen.is_null() {
             return std::ptr::null_mut();
         }
-        let path = unsafe { CStr::from_ptr(script_path).to_string_lossy() };
+        let script = unsafe { CStr::from_ptr(script_path).to_string_lossy() };
         SCRIPT_BUFFER.with(|buffer| {
             let mut buffer = buffer.borrow_mut();
 
-            if !path.starts_with("./script") {
-                if let Some(len) = read_file(path.as_ref(), &mut *buffer) {
+            let script_name = script.strip_prefix("./").unwrap_or(script.as_ref());
+            let path = {
+                #[cfg(feature = "ygomobile_support")] {
+                    let base_path = super::config_manager::load()
+                        .get_or("path", "./")
+                        .to_string();
+                    Path::new(&base_path).join(script_name)
+                }
+                #[cfg(not(feature = "ygomobile_support"))] {
+                    PathBuf::from(script.as_ref())
+                }
+            };
+
+            if !script.starts_with("./script") {
+                if let Some(len) = read_file(&path, &mut *buffer) {
                     unsafe { *slen = len as c_int; }
                     return buffer.as_mut_ptr();
                 }
                 return std::ptr::null_mut();
             }
 
-            let script_name = &path[2..];
-            let expansions_path = format!("./expansions/{}", script_name);
+            let expansions_path = {
+                #[cfg(feature = "ygomobile_support")] {
+                    let base_path = super::config_manager::load()
+                        .get_or("path", "./")
+                        .to_string();
+                    let base_path = Path::new(&base_path);
+                    base_path.join("expansions").join(script_name)
+                }
+                #[cfg(not(feature = "ygomobile_support"))] {
+                    PathBuf::from(format!("./expansions/{}", script_name))
+                }
+            };
             let config_manager = super::config_manager::load();
             let prefer_expansion_script = config_manager.get("prefer_expansion_script").map(|value| value.trim() != "0").unwrap_or(false);
 
@@ -239,7 +304,7 @@ pub mod data_manager {
                     unsafe { *slen = len as c_int; }
                     return buffer.as_mut_ptr();
                 }
-                if let Some(len) = read_file(path.as_ref(), &mut *buffer) {
+                if let Some(len) = read_file(&path, &mut *buffer) {
                     unsafe { *slen = len as c_int; }
                     return buffer.as_mut_ptr();
                 }
@@ -249,7 +314,7 @@ pub mod data_manager {
                     unsafe { *slen = len as c_int; }
                     return buffer.as_mut_ptr();
                 }
-                if let Some(len) = read_file(path.as_ref(), &mut *buffer) {
+                if let Some(len) = read_file(&path, &mut *buffer) {
                     unsafe { *slen = len as c_int; }
                     return buffer.as_mut_ptr();
                 }
@@ -308,22 +373,74 @@ pub mod deck_manager {
     }
 
     pub fn init() {
-        let config_manager = super::config_manager::load();
-        let lflist_path = config_manager.get("lflist_path").unwrap_or("expansions/lflist.conf, lflist.conf").to_string();
-
         let mut deck_manager = DeckManager::new();
-        for lflist_pattern in super::config_manager::split_paths(&lflist_path) {
-            let Ok(entries) = glob::glob(lflist_pattern) else {
-                log::warn!("Failed to parse glob {}", lflist_pattern);
-                continue;
-            };
-            for entry in entries {
-                let path = entry.map_err(|err| log::warn!("Failed to read glob entry {}: {:?}", lflist_pattern, err)).ok();
-                if let Some(path) = path {
-                    deck_manager.load_lflist(&path.to_string_lossy())
-                        .map_err(|err| log::warn!("Failed to read lflist {}: {:?}", path.display(), err)).ok();
+        #[cfg(not(feature = "ygomobile_support"))]
+        {
+            let config_manager = super::config_manager::load();
+            let lflist_path = config_manager
+                .get("lflist_path")
+                .unwrap_or("expansions/lflist.conf, lflist.conf")
+                .to_string();
+
+            for lflist_pattern in super::config_manager::split_paths(&lflist_path) {
+                let Ok(entries) = glob::glob(lflist_pattern) else {
+                    log::warn!("Failed to parse glob {}", lflist_pattern);
+                    continue;
+                };
+                for entry in entries {
+                    let path = entry
+                        .map_err(|err| {
+                            log::warn!("Failed to read glob entry {}: {:?}", lflist_pattern, err)
+                        })
+                        .ok();
+                    if let Some(path) = path {
+                        deck_manager
+                            .load_lflist(&path.to_string_lossy())
+                            .map_err(|err| {
+                                log::warn!("Failed to read lflist {}: {:?}", path.display(), err)
+                            })
+                            .ok();
+                    }
                 }
             }
+        }
+
+        #[cfg(feature = "ygomobile_support")]
+        {
+            use std::path::Path;
+            use std::path::PathBuf;
+            use walkdir::WalkDir;
+
+            let path: String = super::config_manager::load()
+                .get_or("path", "./")
+                .to_string();
+            let path: &Path = Path::new(&path);
+            let lflist_path: PathBuf = path.join("lflist.conf");
+
+            WalkDir::new(path.join("expansions"))
+                .max_depth(1)
+                .into_iter()
+                .for_each(|i| {
+                    if let Ok(i) = i {
+                        let p: &Path = i.path();
+                        if let Some(name) = p.file_name().and_then(|n| n.to_str())
+                            && name.ends_with("lflist.conf")
+                        {
+                            deck_manager
+                                .load_lflist(&p.to_string_lossy())
+                                .map_err(|err| {
+                                    log::warn!("Failed to read lflist {}: {:?}", p.display(), err)
+                                })
+                                .ok();
+                        }
+                    }
+                });
+            deck_manager
+                .load_lflist(&lflist_path.to_string_lossy())
+                .map_err(|err| {
+                    log::warn!("Failed to read lflist {}: {:?}", lflist_path.display(), err)
+                })
+                .ok();
         }
         if !deck_manager.lflists.is_empty() {
             deck_manager.lflists.push(LFList {
@@ -413,6 +530,10 @@ pub mod config_manager {
             Self {
                 entries: HashMap::new(),
             }
+        }
+
+        pub fn from(entries: HashMap<String, String>) -> Self {
+            Self { entries }
         }
 
         pub fn load(&mut self, path: &str) -> io::Result<()> {
