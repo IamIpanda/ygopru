@@ -53,6 +53,7 @@ card = [
     "ygopro-core-wrapper/card",
     "ygopro-data/card",
 ]
+koishi = ["ygopro-core-wrapper/koishi"]
 
 [package.metadata]
 ygopro-version = "1.36.2"
