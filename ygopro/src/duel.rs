@@ -42,6 +42,7 @@ pub(crate) fn log_plugin_statistics(
         let ygopro_ex_count = ygopro_ex_handler_counts.get(plugin_name.as_str()).copied().unwrap_or(0);
         let ygocore_count = ygocore_handler_counts.get(plugin_name.as_str()).copied().unwrap_or(0);
         let command_count = command_counts.get(plugin_name.as_str()).copied().unwrap_or(0);
+        if ygopro_count == 0 && ygopro_ex_count == 0 && ygocore_count == 0 && command_count == 0 { continue; }
         let handler_parts = [(ygopro_count, "ygopro handlers"), (ygopro_ex_count, "ygopro ex handlers"), (ygocore_count, "ygocore handlers"), (command_count, "command")]
             .into_iter()
             .filter(|(count, _)| *count > 0)

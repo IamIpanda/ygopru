@@ -1,6 +1,4 @@
-//! YGOPro, rewritten in rust version.
-//! 
-//! Here should be some very big readme.
+#![doc = include_str!("../README.md")]
 
 pub mod single_duel;
 pub mod tag_duel;

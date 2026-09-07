@@ -84,7 +84,7 @@ prepare_upstream_suffixes() {
     local upstream_ref
     upstream_ref="$(read_upstream_ref "$crate_directory")"
     if [[ -n "$upstream_ref" ]]; then
-      crate_version="${crate_version%%+*}+official.${upstream_ref}"
+      crate_version="${crate_version%%+*}+official.${upstream_ref:0:8}"
       set_package_version "$crate_directory/Cargo.toml" "$crate_version"
       echo "upstream $crate_name labeled $crate_version"
     elif [[ -d "$crate_directory/ocgcore/.git" || -f "$crate_directory/ocgcore/.git" ]]; then

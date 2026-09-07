@@ -1,10 +1,11 @@
 [package]
 name = "ygopro-external-server-bridge"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
 description = "A ygopro-handler RoomProvider that runs an external YGOPro binary as the duel backend."
+readme = "README.md"
 keywords = ["ygopro"]
 
 [lib]
