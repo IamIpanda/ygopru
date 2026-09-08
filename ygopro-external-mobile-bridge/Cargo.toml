@@ -1,0 +1,21 @@
+[package]
+name = "ygopro-external-mobile-bridge"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "ygoserver"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ygopro = { path = "../ygopro", default-features = false }
+
+hashbrown = "0.17"
+jni = "0.21"
+parking_lot = { version = "0", features = ["arc_lock", "send_guard"] }
+
+[features]
+default = ["card", "zip"]
+card = ["ygopro/card"]
+zip = ["ygopro/zip"]
