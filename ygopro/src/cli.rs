@@ -148,7 +148,7 @@ pub fn parse_cli_args(args: &[String], format: ArgsFormat) -> Result<ServerArgum
     match format {
         ArgsFormat::Mobile => {
             let base_path = args.get(12).cloned().unwrap_or_else(|| String::from("./"));
-            let seeds = args.iter().skip(15).map(|seed_argument| decode_seed(seed_argument)).collect::<Result<Vec<_>, _>>()?;
+            let seeds = args.iter().skip(13).map(|seed_argument| decode_seed(seed_argument)).collect::<Result<Vec<_>, _>>()?;
             Ok(ServerArguments {
                 port,
                 host_info,
@@ -172,7 +172,7 @@ pub fn parse_cli_args(args: &[String], format: ArgsFormat) -> Result<ServerArgum
 }
 
 fn infer_format(tail: &str) -> Result<ArgsFormat, CliError> {
-    if (tail.contains('.') || tail.starts_with('/')) && Path::new(tail).exists() {
+    if Path::new(tail).exists() {
         return Ok(ArgsFormat::Mobile);
     }
     match base64::engine::general_purpose::STANDARD.decode(tail) {
