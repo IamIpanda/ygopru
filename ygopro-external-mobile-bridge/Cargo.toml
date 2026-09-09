@@ -23,4 +23,3 @@ parking_lot = { version = "0", features = ["arc_lock", "send_guard"] }
 default = ["card", "zip"]
 card = ["ygopro/card"]
 zip = ["ygopro/zip"]
-koishi = ["ygopro/koishi"]
