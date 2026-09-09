@@ -10,6 +10,7 @@ ygopro-data = { path = "./ygopro-data", default-features = false }
 ygopro-handler = { path = "./ygopro-handler", default-features = false }
 ygopro-core-wrapper = { path = "./ygopro-core-wrapper", default-features = false }
 ygopro-derive = { path = "./ygopro-derive" }
+ygopro-external-mobile-bridge = { path = "./ygopro-external-mobile-bridge", default-features = false }
 ygopro-external-server-bridge = { path = "./ygopro-external-server-bridge", default-features = false }
 
 [workspace]
