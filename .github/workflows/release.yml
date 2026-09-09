@@ -229,7 +229,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/android/${{ matrix.abi }}
-          cp target/${{ matrix.target }}/release/${{ matrix.output }} dist/android/${{ matrix.abi }}/
+          cp target/${{ matrix.target }}/release/${{ matrix.output }} \
+            dist/android/${{ matrix.abi }}/libygoserver-${{ matrix.abi }}.so
 
       - name: Upload executable artifact
         if: matrix.kind == 'executable'
@@ -244,7 +245,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ygoserver-android-${{ matrix.abi }}
-          path: dist/android/${{ matrix.abi }}/${{ matrix.output }}
+          path: dist/android/${{ matrix.abi }}/libygoserver-${{ matrix.abi }}.so
           if-no-files-found: error
 
   release:
