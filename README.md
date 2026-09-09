@@ -8,11 +8,7 @@
 </div>
 
 ---
-
-> [!IMPORTANT]
-> This project is under development. Anything you see may change later.
-
-A modern async rewrite of the [YGOPro server](https://github.com/mycard/ygopro) in Rust.
+A modern rewrite of the [YGOPro server](https://github.com/mycard/ygopro) in Rust.
 
 ygopru reimplements the YGOPro server stack from scratch in Rust, speaking the same protocol 
 so existing YGOPro clients can connect without modification. The duelling engine
@@ -47,9 +43,9 @@ server the serialization/deserialization overhead makes performance slightly low
 - Rust toolchain (edition 2024, stable)
 - A C++14 compiler (gcc/clang/MSVC) — required to build ocgcore
 - Tested on:
-  - linux
-  - M4 mac
-  - win10 with vs2022
+  - Linux with gcc
+  - M4 mac with clang
+  - Win10 with vs2022 msvc
 
 ### Compiling
 
@@ -166,5 +162,5 @@ via `--server-bin <path> [--server-cwd <dir>]`. You need a self-compiling server
 ## Related projects
 
 - [ygopro](https://github.com/Fluorohydride/ygopro) — the original C++ YGOPro client
-- [ygopro](https://github.com/mycard/ygopro) — the server extension this project is based on
+- [ygopro-server](https://github.com/mycard/ygopro/tree/server) — the server extension this project is based on
 - [ygopro-core](https://github.com/Fluorohydride/ygopro-core) — the ocgcore duelling engine this project links against

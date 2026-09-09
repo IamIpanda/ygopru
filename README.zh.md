@@ -8,11 +8,7 @@
 </div>
 
 ---
-
-> [!IMPORTANT]
-> 本项目仍在开发中。之后的内容随时可能变动。
-
-用 Rust 对 [YGOPro 服务器](https://github.com/mycard/ygopro) 的现代化异步重写。
+用 Rust 对 [YGOPro 服务器](https://github.com/mycard/ygopro) 的现代化重写。
 
 ygopru 从头用 Rust 重新实现了整个 YGOPro 服务器栈，并沿用相同的协议，因此现有的 YGOPro 客户端无需改动即可连接。对局引擎本身仍是久经考验的 [ygopro-core](https://github.com/mycard/ygopro-core)（ocgcore），通过一个 FFI 包装层链接；而它周围的一切 —— 网络、消息处理、房间管理、回放 —— 均由 Rust 重写。
 
@@ -38,10 +34,10 @@ ygopru 从头用 Rust 重新实现了整个 YGOPro 服务器栈，并沿用相�
 
 - Rust 工具链（edition 2024，stable）
 - 一个 C++14 编译器（gcc/clang/MSVC）—— 构建 ocgcore 需要
-- 已在以下环境测试：
-  - linux
-  - M4 mac
-  - win10 with vs2022
+- 已在以下环境测试编译通过：
+  - Linux with gcc
+  - M4 mac with clang
+  - Win10 with vs2022 msvc
 
 ### 编译
 
@@ -157,5 +153,5 @@ docker run -p 7911:7911 \
 ## 相关项目
 
 - [ygopro](https://github.com/Fluorohydride/ygopro) —— 原始 C++ YGOPro 客户端
-- [ygopro](https://github.com/mycard/ygopro) —— 本项目所基于的服务器扩展
+- [ygopro-server](https://github.com/mycard/ygopro/tree/server) —— 本项目所基于的服务器扩展
 - [ygopro-core](https://github.com/Fluorohydride/ygopro-core) —— 本项目链接的 ocgcore 对局引擎
