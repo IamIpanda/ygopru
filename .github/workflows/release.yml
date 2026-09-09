@@ -262,3 +262,25 @@ jobs:
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.so
+
+      - name: Delete previous release-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view release-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete release-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/release-latest" >/dev/null 2>&1; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/release-latest"
+          fi
+
+      - name: Publish release-latest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release-latest
+          name: release-latest
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.so
