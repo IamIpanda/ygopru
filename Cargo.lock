@@ -1965,6 +1965,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ygopro-external-mobile-bridge"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.17.1",
+ "jni",
+ "parking_lot",
+ "ygopro",
+]
+
+[[package]]
 name = "ygopro-external-server-bridge"
 version = "0.1.1"
 dependencies = [
@@ -2017,27 +2027,6 @@ dependencies = [
  "ygopro-core-wrapper",
  "ygopro-data",
  "ygopro-external-server-bridge",
- "ygopro-handler",
-]
-
-[[package]]
-name = "ygoserver"
-version = "0.1.0"
-dependencies = [
- "base64",
- "binrw",
- "env_logger 0.11.11",
- "futures",
- "hashbrown 0.17.1",
- "jni",
- "log",
- "parking_lot",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "ygopro",
- "ygopro-core-wrapper",
- "ygopro-data",
  "ygopro-handler",
 ]
 

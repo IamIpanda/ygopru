@@ -21,9 +21,9 @@ members = [
     "ygopro-core-wrapper",
     "ygopro-handler",
     "ygopro",
-    "ygoserver",
     "ygopro-toolkits",
-    "ygopro-external-server-bridge"
+    "ygopro-external-mobile-bridge",
+    "ygopro-external-server-bridge",
 ]
 
 [profile.release]

@@ -10,6 +10,7 @@ pub mod replay;
 pub mod message;
 pub mod command;
 pub mod cli;
+pub mod ffi;
 pub mod ygopro_handlers;
 pub mod ygocore_handlers;
 pub mod player;

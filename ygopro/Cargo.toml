@@ -12,6 +12,7 @@ keywords = ["ygopro"]
 [lib]
 name = "ygopro"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "ygopro"
@@ -55,7 +56,6 @@ card = [
     "ygopro-data/card",
 ]
 koishi = ["ygopro-core-wrapper/koishi"]
-ygomobile_support = []
 
 [package.metadata]
 ygopro-version = "1.36.2"
