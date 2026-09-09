@@ -13,10 +13,22 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            flavor: official
+            artifact: linux-x86_64
+          - os: ubuntu-latest
+            flavor: koishi
             artifact: linux-x86_64
           - os: macos-15
+            flavor: official
+            artifact: macos-aarch64
+          - os: macos-15
+            flavor: koishi
             artifact: macos-aarch64
           - os: windows-latest
+            flavor: official
+            artifact: windows-x86_64
+          - os: windows-latest
+            flavor: koishi
             artifact: windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
@@ -36,7 +48,13 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build release binary
-        run: cargo build --release
+        shell: bash
+        run: |
+          if [ "${{ matrix.flavor }}" = "koishi" ]; then
+            cargo build --release -p ygopro --features koishi
+          else
+            cargo build --release -p ygopro
+          fi
 
       - name: Compress binaries with UPX
         if: runner.os != 'macOS'
@@ -58,20 +76,26 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            BIN="target/release/ygopro.exe"
-            NAME="ygopro.exe"
+            cp "target/release/ygopro.exe" "ygopro.exe"
+            cp "target/release/ygopro.dll" "ygopro.dll"
+            TARBALL_FILES="ygopro.exe ygopro.dll"
           else
-            BIN="target/release/ygopro"
-            NAME="ygopro"
+            cp "target/release/ygopro" "ygopro"
+            if [ "$RUNNER_OS" = "macOS" ]; then
+              cp "target/release/libygopro.dylib" "libygopro.dylib"
+              TARBALL_FILES="ygopro libygopro.dylib"
+            else
+              cp "target/release/libygopro.so" "libygopro.so"
+              TARBALL_FILES="ygopro libygopro.so"
+            fi
           fi
-          cp "$BIN" "$NAME"
-          tar -czf "ygopro-${{ steps.version.outputs.version }}-${{ matrix.artifact }}.tar.gz" "$NAME"
+          tar -czf "ygopro-${{ steps.version.outputs.version }}-${{ matrix.flavor }}-${{ matrix.artifact }}.tar.gz" $TARBALL_FILES
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ygopro-${{ steps.version.outputs.version }}-${{ matrix.artifact }}
-          path: "ygopro-${{ steps.version.outputs.version }}-${{ matrix.artifact }}.tar.gz"
+          name: ygopro-${{ steps.version.outputs.version }}-${{ matrix.flavor }}-${{ matrix.artifact }}
+          path: "ygopro-${{ steps.version.outputs.version }}-${{ matrix.flavor }}-${{ matrix.artifact }}.tar.gz"
           if-no-files-found: error
 
   release:
