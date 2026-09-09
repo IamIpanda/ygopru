@@ -13,7 +13,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ygopro = { path = "../ygopro", default-features = false }
+ygopro.workspace = true
 
 hashbrown = "0.17"
 jni = "0.21"
