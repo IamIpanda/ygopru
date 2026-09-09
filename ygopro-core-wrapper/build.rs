@@ -105,6 +105,8 @@ fn main() {
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     if target_env == "msvc" {
         build.flag("/TP");
+        // Decode UTF-8 sources consistently regardless of the Windows code page.
+        build.flag("/utf-8");
     } else {
         build.flag("-Wno-deprecated-declarations");
     }
