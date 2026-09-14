@@ -426,6 +426,12 @@ pub trait ContainsMap {
     fn get_map(&self) -> &anymap3::Map<dyn anymap3::CloneAny + Send>;
 }
 
+impl<S: ContainsMap> ContainsMap for std::mem::ManuallyDrop<S> {
+    fn get_map(&self) -> &anymap3::Map<dyn anymap3::CloneAny + Send> {
+        ContainsMap::get_map(&**self)
+    }
+}
+
 /// A state that exposes an `anymap` by mutable reference.
 pub trait ContainsMapMut {
     /// Get the `anymap` by mutable reference.
