@@ -24,6 +24,97 @@ use crate::data::Response;
 use crate::message::HostInfo;
 use crate::utils::string::FixedLengthString;
 
+#[cfg(feature = "forge")]
+pub mod forge {
+    use std::io::Cursor;
+    use std::io::Error;
+    use std::io::ErrorKind;
+
+    use binrw::BinRead;
+    use binrw::BinWrite;
+    use binrw::binrw;
+    use binrw::helpers::until_eof;
+
+    use crate::message::game_message;
+
+    #[binrw]
+    struct Record {
+        message_type: u8,
+        #[bw(calc = payload.len() as u32)]
+        payload_size: u32,
+        #[br(count = payload_size)]
+        payload: Vec<u8>,
+    }
+
+    #[binrw]
+    struct Records(#[br(parse_with = until_eof)] Vec<Record>);
+
+    #[binrw]
+    #[derive(Clone, Debug)]
+    pub struct Replay {
+        #[br(try_map = |records: Records| records.try_into())]
+        #[bw(try_map = |messages| Records::try_from(messages))]
+        pub messages: Vec<game_message::Message>,
+    }
+
+    impl TryFrom<Records> for Vec<game_message::Message> {
+        type Error = binrw::Error;
+
+        fn try_from(value: Records) -> Result<Self, Self::Error> {
+            value.0.into_iter().map(|record| {
+                let mut message = Vec::with_capacity(record.payload.len() + 1);
+                message.push(record.message_type);
+                message.extend(record.payload);
+                game_message::Message::read_le(&mut Cursor::new(message))
+            }).collect()
+        }
+    }
+
+    impl TryFrom<&Vec<game_message::Message>> for Records {
+        type Error = binrw::Error;
+
+        fn try_from(value: &Vec<game_message::Message>) -> Result<Self, Self::Error> {
+            value.iter().map(|message| {
+                let mut writer = Cursor::new(Vec::new());
+                message.write_le(&mut writer)?;
+                let message = writer.into_inner();
+                let (&message_type, payload) = message.split_first().ok_or_else(|| Error::new(ErrorKind::InvalidData, "message has no type"))?;
+                Ok(Record { message_type, payload: payload.to_vec() })
+            }).collect::<Result<Vec<_>, _>>().map(Self)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::io::Cursor;
+
+        use binrw::BinRead;
+        use binrw::BinWrite;
+
+        use crate::message::game_message;
+        use crate::utils::string::U16String;
+
+        use super::Replay;
+
+        #[test]
+        fn roundtrip() {
+            let original = Replay {
+                messages: vec![
+                    game_message::SibylChat { msg: U16String::new("test".to_string()) }.into(),
+                    game_message::Waiting.into(),
+                ],
+            };
+            let mut writer = Cursor::new(Vec::new());
+            original.write_le(&mut writer).unwrap();
+            let bytes = writer.into_inner();
+            let decoded = Replay::read_le(&mut Cursor::new(&bytes)).unwrap();
+            let mut writer = Cursor::new(Vec::new());
+            decoded.write_le(&mut writer).unwrap();
+            assert_eq!(writer.into_inner(), bytes);
+        }
+    }
+}
+
 const SIZE_REPLAY_SEED: usize = 8;
 
 #[repr(u32)]
@@ -316,6 +407,15 @@ mod test {
        let mut reader = Cursor::new(arr);
        let replay = Replay::read_le(&mut reader);
        println!("{:?}", replay);
+    }
+
+    #[test]
+    #[ignore]
+     #[cfg(feature = "forge")]
+    fn test_deserialize_replay2() {
+       let arr = std::fs::read("//mnt/warehouse/replays/09-17「19：40：30」.yrp3d").unwrap();
+         let replay = crate::data::forge::Replay::read_le(&mut Cursor::new(arr));
+         println!("{:?}", replay);
     }
 
     #[test]

@@ -10,7 +10,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
 use ygopro_data::constants::*;
-use ygopro_data::data::*;
 use ygopro_data::message::HostInfo;
 use ygopro_data::message::gm::GameMessage;
 use ygopro_data::message::{ctos, stoc, gm};
@@ -190,55 +189,6 @@ impl SingleDuel {
         Some(handle)
     }
 
-    /// create a replay, fill all fields except the data part.
-    /// 
-    /// Can't put into [`Duel`] because First attack player always put in first.
-    pub fn create_replay_without_data(&self) -> Option<Replay> {
-        let (host_player, client_player) = match self.first_attack_player? {
-            PlayerIndex::Player1 => ( self.players[0].as_ref()?, self.players[1].as_ref()? ),
-            PlayerIndex::Player2 => ( self.players[1].as_ref()?, self.players[0].as_ref()? ),
-            _ => { warn!("first attack player is not a valid player index: {:?}", self.first_attack_player); return None; }
-        };
-        let seed_sequence = *self.duel.seed();
-        let mut duel_options = DuelOptions::empty();
-        if self.host_info.no_shuffle_deck {
-            duel_options.insert(DuelOptions::PseudoShuffle);
-        }
-        let host_deck = host_player.deck.clone().into();
-        let client_deck = client_player.deck.clone().into();
-        let mut replay = Replay {
-            header: ReplayHeader {
-                id: ReplayVersion::V2 as u32,
-                version: *crate::plugin::version_check::PRO_VERSION as u32,
-                flag: ReplayHeaderFlags::Uniform | ReplayHeaderFlags::Compressed,
-                seed: 0,
-                data_size: 0,
-                start_time: self.start_time,
-                props: [93, 0, 0, 128, 0, 0, 0, 0],
-                seed_sequence,
-                header_version: 1,
-                reserved: [0; 3],
-            },
-            body: ReplayBody {
-                host_name: host_player.name.clone(),
-                client_name: client_player.name.clone(),
-                tag_host_name: None,
-                tag_client_name: None,
-                start_lp: self.host_info.start_lp,
-                start_hand: self.host_info.start_hand as u32,
-                draw_count: self.host_info.draw_count as u32,
-                duel_options,
-                duel_rule: self.host_info.duel_rule as u16,
-                host_deck,
-                client_deck,
-                tag_host_deck: None,
-                tag_client_deck: None,
-                datas: vec![],
-            }
-        };
-        replay.fill_data_size();
-        Some(replay)
-    }
 
     /// Set a player as waiting for select message response.
     pub fn set_waiting(&mut self, player: CorePlayer) -> Option<()> {
@@ -526,12 +476,15 @@ pub mod ygopro_handlers {
         duel.refresh(CorePlayer::All, Location::Extra, -1, Query::empty(), transformer);
     }
 
-    #[handler(ygopro::GenerateReplay)]
+    #[after(ygopro::GenerateReplay)]
     #[register_to(SINGLE_DUEL_YGOPRO_HANDLERS_EX as HandlerEx)]
-    fn on_generate_replay(duel: &mut SingleDuel) -> Option<stoc::Message> {
-        let mut replay = duel.create_replay_without_data()?;
-        replay.body.datas = duel.client_responses.clone().into_iter().map(|r| r.response.into()).collect();
-        Some(stoc::Replay { replay: Box::new(replay) }.into())
+    fn on_generate_replay(duel: &mut SingleDuel, response: &mut crate::ygopro_handlers::Response) {
+        if duel.first_attack_player != Some(PlayerIndex::Player2) {
+            return;
+        }
+        let crate::ygopro_handlers::Response::Replace(stoc::Message::Replay(message)) = response else { return };
+        std::mem::swap(&mut message.replay.body.host_name, &mut message.replay.body.client_name);
+        std::mem::swap(&mut message.replay.body.host_deck, &mut message.replay.body.client_deck);
     }
 
     #[handler(ygopro::DuelEnd)]

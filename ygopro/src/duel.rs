@@ -14,6 +14,12 @@ use ygopro_core_wrapper as core;
 use ygopro_data::complex::Complex;
 use ygopro_data::constants::*;
 use ygopro_data::data::CardPosition;
+use ygopro_data::data::DuelOptions;
+use ygopro_data::data::Replay;
+use ygopro_data::data::ReplayBody;
+use ygopro_data::data::ReplayHeader;
+use ygopro_data::data::ReplayHeaderFlags;
+use ygopro_data::data::ReplayVersion;
 use ygopro_data::data::UpdateCardInfo;
 use ygopro_data::message::HostInfo;
 use ygopro_data::message::gm::GameMessage;
@@ -494,6 +500,88 @@ impl Duel {
             request_sender,
             request_receiver: Some(request_receiver),
         }
+    }
+
+    #[cfg(feature = "forge")]
+    pub fn create_replay_forge(&self, masked: bool) -> Option<ygopro_data::data::forge::Replay> {
+        let is_tag = self.host_info.mode == Mode::Tag;
+        let host_player = self.get(PlayerIndex::Player1)?;
+        let client_player = self.get(if is_tag { PlayerIndex::Player4 } else { PlayerIndex::Player2 })?;
+        let tag_host_player = if is_tag { Some(self.get(PlayerIndex::Player2)?) } else { None };
+        let tag_client_player = if is_tag { Some(self.get(PlayerIndex::Player3)?) } else { None };
+        let recorded = if masked { &self.sender.masked_messages } else { &self.sender.messages };
+        let start = recorded.iter().rposition(|message| matches!(message.try_get(), Ok(stoc::Message::DuelStart(_))))?;
+        let mut messages = Vec::with_capacity(recorded.len() - start + 1);
+        messages.push(gm::SibylName {
+            host_name: (&*host_player.name).into(),
+            host_tag_name: tag_host_player.map_or(FixedLengthString::allocate(), |player| (&*player.name).into()),
+            host_current_name: (&*host_player.name).into(),
+            client_name: (&*client_player.name).into(),
+            client_tag_name: tag_client_player.map_or(FixedLengthString::allocate(), |player| (&*player.name).into()),
+            client_current_name: (&*client_player.name).into(),
+            master_rule: self.host_info.duel_rule,
+        }.into());
+        for message in &recorded[start..] {
+            let Ok(message) = message.try_get() else { continue };
+            match message {
+                stoc::Message::GameMessage(game_message) => messages.push(game_message.message.clone().into()),
+                stoc::Message::Chat(chat) => messages.push(gm::SibylChat { msg: chat.msg.clone() }.into()),
+                stoc::Message::Replay(replay) => messages.push(gm::SibylReplay { replay: replay.replay.clone() }.into()),
+                _ => (),
+            }
+        }
+        Some(ygopro_data::data::forge::Replay { messages })
+    }
+
+    pub fn create_replay(&self) -> Option<Replay> {
+        let is_tag = self.host_info.mode == Mode::Tag;
+        let host_player = self.get(PlayerIndex::Player1)?;
+        let client_player = self.get(if is_tag { PlayerIndex::Player4 } else { PlayerIndex::Player2 })?;
+        let tag_host_player = if is_tag { Some(self.get(PlayerIndex::Player2)?) } else { None };
+        let tag_client_player = if is_tag { Some(self.get(PlayerIndex::Player3)?) } else { None };
+        let mut duel_options = DuelOptions::empty();
+        if self.host_info.no_shuffle_deck {
+            duel_options.insert(DuelOptions::PseudoShuffle);
+        }
+        if is_tag {
+            duel_options.insert(DuelOptions::TagMode);
+        }
+        let mut flags = ReplayHeaderFlags::Uniform | ReplayHeaderFlags::Compressed;
+        if is_tag {
+            flags.insert(ReplayHeaderFlags::Tag);
+        }
+        let mut replay = Replay {
+            header: ReplayHeader {
+                id: ReplayVersion::V2 as u32,
+                version: *crate::plugin::version_check::PRO_VERSION as u32,
+                flag: flags,
+                seed: 0,
+                data_size: 0,
+                start_time: self.start_time,
+                props: [93, 0, 0, 128, 0, 0, 0, 0],
+                seed_sequence: *self.seed(),
+                header_version: 1,
+                reserved: [0; 3],
+            },
+            body: ReplayBody {
+                host_name: host_player.name.clone(),
+                tag_host_name: tag_host_player.map(|player| player.name.clone()),
+                tag_client_name: tag_client_player.map(|player| player.name.clone()),
+                client_name: client_player.name.clone(),
+                start_lp: self.host_info.start_lp,
+                start_hand: self.host_info.start_hand as u32,
+                draw_count: self.host_info.draw_count as u32,
+                duel_options,
+                duel_rule: self.host_info.duel_rule as u16,
+                host_deck: host_player.deck.clone().into(),
+                tag_host_deck: tag_host_player.map(|player| player.deck.clone().into()),
+                client_deck: client_player.deck.clone().into(),
+                tag_client_deck: tag_client_player.map(|player| player.deck.clone().into()),
+                datas: self.client_responses.iter().cloned().map(|response| response.response.into()).collect(),
+            }
+        };
+        replay.fill_data_size();
+        Some(replay)
     }
 
     /// Get a player by [`PlayerIndex`].

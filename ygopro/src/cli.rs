@@ -235,7 +235,12 @@ pub fn build_duel_host(hostinfo: HostInfo, replay_mode: ReplayMode, pre_seeds: V
             None => DuelSeed::None,
         }
     }));
-    configuration.enable_plugin_with_configuration(crate::plugin::replay::NAME, crate::plugin::replay::Configuration { mode: replay_mode });
+    configuration.enable_plugin_with_configuration(crate::plugin::replay::NAME, crate::plugin::replay::Configuration {
+        mode: replay_mode,
+        save_path: "replays".to_string(),
+        file_template: "%Y-%m-%d %H-%M-%S {players}".to_string(),
+        format: crate::plugin::replay::Format::Raw,
+    });
     DuelHost::new(hostinfo, configuration)
 }
 

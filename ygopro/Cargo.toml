@@ -27,6 +27,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 parking_lot = { version = "0", features = ["arc_lock", "send_guard"] }
 env_logger = { version = "0.11", features = ["auto-color", "humantime"] }
 anymap3 = { version = "1", default-features = false, features = ["hashbrown"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
 bytes = "1"
 log = "0.4"
@@ -49,13 +50,14 @@ semver = "1"
 toml = "0.9"
 
 [features]
-default = ["zip", "card"]
+default = ["zip", "card", "forge"]
 zip = ["dep:zip"]
 card = [
     "ygopro-core-wrapper/card",
     "ygopro-data/card",
 ]
 koishi = ["ygopro-core-wrapper/koishi"]
+forge = ["ygopro-data/forge"]
 
 [package.metadata]
 ygopro-version = "1.36.2"

@@ -26,5 +26,6 @@ syn = "1.0"
 darling = "0.14"
 
 [features]
-default = ["card"]
+default = ["card","forge"]
 card=["dep:rusqlite"]
+forge=[]

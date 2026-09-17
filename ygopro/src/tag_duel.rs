@@ -10,7 +10,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
 use ygopro_data::constants::*;
-use ygopro_data::data::*;
 use ygopro_data::message::HostInfo;
 use ygopro_data::message::gm::GameMessage;
 use ygopro_data::message::{ctos, stoc, gm};
@@ -251,52 +250,6 @@ impl TagDuel {
         Some(handle)
     }
 
-    /// Create a replay, filling all fields except the data part.
-    pub fn create_replay_without_data(&self) -> Option<Replay> {
-        let host_player = self.players[0].as_ref()?;
-        let tag_host_player = self.players[1].as_ref()?;
-        let client_player = self.players[3].as_ref()?;
-        let tag_client_player = self.players[2].as_ref()?;
-        let seed_sequence = *self.duel.seed();
-        let mut duel_options = DuelOptions::empty();
-        if self.host_info.no_shuffle_deck {
-            duel_options.insert(DuelOptions::PseudoShuffle);
-        }
-        duel_options.insert(DuelOptions::TagMode);
-        let mut replay = Replay {
-            header: ReplayHeader {
-                id: ReplayVersion::V2 as u32,
-                version: *crate::plugin::version_check::PRO_VERSION as u32,
-                flag: ReplayHeaderFlags::Uniform | ReplayHeaderFlags::Compressed | ReplayHeaderFlags::Tag,
-                seed: 0,
-                data_size: 0,
-                start_time: self.start_time,
-                props: [93, 0, 0, 128, 0, 0, 0, 0],
-                seed_sequence,
-                header_version: 1,
-                reserved: [0; 3],
-            },
-            body: ReplayBody {
-                // names are written in slot order 0,1,2,3 like the original ygopro
-                host_name: host_player.name.clone(),
-                tag_host_name: Some(tag_host_player.name.clone()),
-                client_name: client_player.name.clone(),
-                tag_client_name: Some(tag_client_player.name.clone()),
-                start_lp: self.host_info.start_lp,
-                start_hand: self.host_info.start_hand as u32,
-                draw_count: self.host_info.draw_count as u32,
-                duel_options,
-                duel_rule: self.host_info.duel_rule as u16,
-                host_deck: host_player.deck.clone().into(),
-                tag_host_deck: Some(tag_host_player.deck.clone().into()),
-                client_deck: client_player.deck.clone().into(),
-                tag_client_deck: Some(tag_client_player.deck.clone().into()),
-                datas: vec![],
-            }
-        };
-        replay.fill_data_size();
-        Some(replay)
-    }
 
     /// Set a player as waiting for a select-message response.
     pub fn set_waiting(&mut self, player: CorePlayer) -> Option<()> {
@@ -727,12 +680,17 @@ pub mod ygopro_handlers {
         duel.refresh(CorePlayer::All, Location::Extra, -1, Query::empty(), transformer);
     }
 
-    #[handler(ygopro::GenerateReplay)]
+    #[after(ygopro::GenerateReplay)]
     #[register_to(TAG_DUEL_YGOPRO_HANDLERS_EX as HandlerEx)]
-    fn on_generate_replay(duel: &mut TagDuel) -> Option<stoc::Message> {
-        let mut replay = duel.create_replay_without_data()?;
-        replay.body.datas = duel.client_responses.clone().into_iter().map(|r| r.response.into()).collect();
-        Some(stoc::Replay { replay: Box::new(replay) }.into())
+    fn on_generate_replay(duel: &mut TagDuel, response: &mut crate::ygopro_handlers::Response) {
+        if duel.first_attack_team != Some(TeamIndex::Team2) {
+            return;
+        }
+        let crate::ygopro_handlers::Response::Replace(stoc::Message::Replay(message)) = response else { return };
+        std::mem::swap(&mut message.replay.body.host_name, message.replay.body.tag_client_name.as_mut().unwrap());
+        std::mem::swap(message.replay.body.tag_host_name.as_mut().unwrap(), &mut message.replay.body.client_name);
+        std::mem::swap(&mut message.replay.body.host_deck, message.replay.body.tag_client_deck.as_mut().unwrap());
+        std::mem::swap(message.replay.body.tag_host_deck.as_mut().unwrap(), &mut message.replay.body.client_deck);
     }
 
     #[handler(ygopro::DuelEnd)]

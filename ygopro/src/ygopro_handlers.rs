@@ -626,9 +626,12 @@ fn on_client_join_final(join: &mut ygopro::ClientJoin) {
     }
 }
 
-// Replay always start with the first Attack player. So we cannot produce replay here.
-// fn on_generate_replay(duel: &mut Duel) -> Option<stoc::Message> {
-// }
+#[handler(ygopro::GenerateReplay)]
+#[register_to(YGOPRO_HANDLERS_EX as HandlerEx)]
+fn on_generate_replay(duel: &mut Duel) -> Option<stoc::Message> {
+    let replay = duel.create_replay()?;
+    Some(stoc::Replay { replay: Box::new(replay) }.into())
+}
 
 #[handler(ygopro::DuelEnd)]
 #[register_to(YGOPRO_HANDLERS_EX as HandlerEx)]

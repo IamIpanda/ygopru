@@ -29,6 +29,7 @@ fn scan_file(path: OsString) -> Result<(), Box<dyn Error>> {
     let mut buf = String::new();
     file.read_to_string(&mut buf)?;
     let file = syn::parse_file(&buf)?;
+    let forge_enabled = std::env::var_os("CARGO_FEATURE_FORGE").is_some();
     let structs = file.items.into_iter()
     .filter_map(|item| match item {
         syn::Item::Struct(struct_item) => Some(struct_item),
@@ -37,6 +38,9 @@ fn scan_file(path: OsString) -> Result<(), Box<dyn Error>> {
     .filter(|struct_item| struct_item.attrs.iter().find(|attr| {
         attr.path.is_ident("derive") && attr.tokens.to_string().contains("Message")
     }).is_some())
+    .filter(|struct_item| forge_enabled || !struct_item.attrs.iter().any(|attr| {
+        attr.path.is_ident("cfg") && attr.tokens.to_string().contains("feature = \"forge\"")
+    }))
     .collect::<Vec<_>>();
     println!("Scan {:?} for {} structs.", path, structs.len());
     generate_content(PathBuf::from(path).file_name().expect("cannot get file stem").to_os_string(), structs);
@@ -91,6 +95,7 @@ fn write_file(name: OsString, content: String) {
 }
 
 fn main() -> io::Result<()>{
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FORGE");
     let path = std::env::var_os("CARGO_MANIFEST_DIR").expect("cannot find cargo manifest directory");
     scan_dir(PathBuf::from(path).join("src").into_os_string()).ok();
     Ok(())

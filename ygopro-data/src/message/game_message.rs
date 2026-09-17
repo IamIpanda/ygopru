@@ -1288,6 +1288,44 @@ pub struct CustomMsg {
     pub data: Vec<u8>
 }
 
+#[binrw]
+#[derive(Debug, Clone, Message, GameMessage)]
+#[message(gm, flag = 230)]
+#[cfg(feature = "forge")]
+pub struct SibylChat {
+    pub msg: crate::utils::string::U16String
+}
+
+#[binrw]
+#[derive(Debug, Clone, Message, GameMessage)]
+#[message(gm, flag = 231)]
+#[cfg(feature = "forge")]
+pub struct SibylReplay {
+    pub replay: Box<crate::data::Replay>
+}
+
+#[binrw]
+#[derive(Debug, Clone, Message, GameMessage)]
+#[message(gm, flag = 235)]
+#[cfg(feature = "forge")]
+pub struct SibylName {
+    pub host_name: crate::utils::string::FixedLengthString<50>,
+    pub host_tag_name: crate::utils::string::FixedLengthString<50>,
+    pub host_current_name: crate::utils::string::FixedLengthString<50>,
+    pub client_name: crate::utils::string::FixedLengthString<50>,
+    pub client_tag_name: crate::utils::string::FixedLengthString<50>,
+    pub client_current_name: crate::utils::string::FixedLengthString<50>,
+    #[br(map = |v: u32| u8::try_from(v).ok().and_then(|v| MasterRule::try_from(v).ok()).unwrap_or(MasterRule::MasterRule1))]
+    #[bw(map = |v: &MasterRule| u8::from(*v) as u32)]
+    pub master_rule: MasterRule
+}
+
+#[binrw]
+#[derive(Debug, Clone, Message, GameMessage)]
+#[message(gm, flag = 236)]
+#[cfg(feature = "forge")]
+pub struct SibylQuit;
+
 #[cfg(test)]
 mod test {
     use binrw::BinRead;
