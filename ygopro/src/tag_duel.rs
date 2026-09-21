@@ -79,7 +79,7 @@ impl PlayerIndex {
     pub fn opponent(self, first_attack_team: TeamIndex) -> Self {
         let opponent_value = match first_attack_team {
             TeamIndex::Team1 => if self.0 < 2 { 3 - self.0 } else { self.0 - 2 },
-            TeamIndex::Team2 => if self.0 < 2 { self.0 + 2 } else { self.0 - 1 },
+            TeamIndex::Team2 => if self.0 < 2 { self.0 + 2 } else { 3 - self.0 },
         };
         PlayerIndex(opponent_value)
     }
@@ -629,7 +629,14 @@ pub mod ygopro_handlers {
     fn on_duel_init(duel: &mut TagDuel) {
         let first_attack_team = duel.first_attack_team.unwrap_or(TeamIndex::Team1);
         for (core_player, team) in [(CorePlayer::FirstAttackPlayer, first_attack_team), (CorePlayer::SecondAttackPlayer, first_attack_team.opponent())] {
-            let leader = team.leader();
+            // The core swaps the second team at the start of turn 2.
+            // Its member must be active initially so that the leader uses
+            // their own deck after that swap, matching PlayerTransformer.
+            let leader = if core_player == CorePlayer::FirstAttackPlayer {
+                team.leader()
+            } else {
+                team.leader().teammate()
+            };
             let member = leader.teammate();
             let Some(leader_deck) = duel.duel.players[leader.0 as usize].as_ref() else { return };
             let Some(member_deck) = duel.duel.players[member.0 as usize].as_ref() else { return };
