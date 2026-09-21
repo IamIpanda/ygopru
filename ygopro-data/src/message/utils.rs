@@ -53,6 +53,106 @@ impl Default for HostInfo {
     }
 }
 
+#[cfg(feature = "forge")]
+mod forge {
+    use crate::complex::Complex;
+    use crate::constants::MasterRule;
+    use crate::constants::Netplayer;
+    use crate::message::gm;
+    use crate::message::stoc;
+    use crate::utils::string::FixedLengthString;
+
+    use super::HostInfo;
+
+    const NO_TAG: &str = "---";
+
+    /// Record the last duel of a recorded stoc stream into the ygopro-forge (aka ygopro2) records of a replay.
+    ///
+    /// The messages a replay cannot hold are dropped. The player names and the master
+    /// rule met in the stream become the leading [`gm::SibylName`], and the messages
+    /// recorded before the last duel start are left out.
+    pub fn stoc_to_forge(recorded: &[Complex<stoc::Message>]) -> Vec<gm::Message> {
+        let messages: Vec<&stoc::Message> = recorded.iter().filter_map(|message| message.try_get().ok()).collect();
+        let start = messages.iter().rposition(|message| matches!(message, stoc::Message::DuelStart(_))).unwrap_or(0);
+        let mut name = gm::SibylName {
+            host_name: FixedLengthString::allocate(),
+            host_tag_name: NO_TAG.into(),
+            host_current_name: FixedLengthString::allocate(),
+            client_name: FixedLengthString::allocate(),
+            client_tag_name: NO_TAG.into(),
+            client_current_name: FixedLengthString::allocate(),
+            master_rule: MasterRule::MasterRule2020,
+        };
+        for message in &messages {
+            match message {
+                stoc::Message::JoinGame(join_game) => name.master_rule = join_game.info.duel_rule,
+                stoc::Message::HsPlayerEnter(enter) => match enter.pos {
+                    Netplayer::Player(0) => {
+                        name.host_name = (&*enter.name).into();
+                        name.host_current_name = (&*enter.name).into();
+                    },
+                    Netplayer::Player(1) => {
+                        name.client_name = (&*enter.name).into();
+                        name.client_current_name = (&*enter.name).into();
+                    },
+                    Netplayer::Player(2) => name.host_tag_name = (&*enter.name).into(),
+                    Netplayer::Player(3) => name.client_tag_name = (&*enter.name).into(),
+                    _ => ()
+                },
+                _ => ()
+            }
+        }
+        let mut forge = vec![gm::Message::from(name.clone())];
+        for message in &messages[start..] {
+            match message {
+                stoc::Message::GameMessage(game_message) => forge.push(game_message.message.clone().into()),
+                stoc::Message::Chat(chat) => forge.push(gm::SibylChat::from((chat, &name)).into()),
+                stoc::Message::Replay(replay) => forge.push(gm::SibylReplay { replay: replay.replay.clone() }.into()),
+                _ => ()
+            }
+        }
+        forge
+    }
+
+    /// Turn the ygopro forge(aka ygopro2) records of a replay back into the stoc stream a client plays.
+    ///
+    /// The leading [`gm::SibylName`] becomes the join response, the player entrances
+    /// and the duel start a client needs before the recorded messages.
+    pub fn forge_to_stoc(messages: &[gm::Message]) -> Vec<stoc::Message> {
+        let mut stoc_messages = Vec::new();
+        let name = messages.iter().find_map(|message| match message { gm::Message::SibylName(name) => Some(name), _ => None });
+        for message in messages {
+            match message {
+                gm::Message::SibylName(name) => {
+                    stoc_messages.push(stoc::Message::from(stoc::JoinGame { info: HostInfo { duel_rule: name.master_rule, ..Default::default() } }));
+                    stoc_messages.push(stoc::Message::from(stoc::HsPlayerEnter { name: (&*name.host_name).into(), pos: Netplayer::Player(0) }));
+                    stoc_messages.push(stoc::Message::from(stoc::HsPlayerEnter { name: (&*name.client_name).into(), pos: Netplayer::Player(1) }));
+                    if has_tag(&name.host_tag_name) {
+                        stoc_messages.push(stoc::Message::from(stoc::HsPlayerEnter { name: (&*name.host_tag_name).into(), pos: Netplayer::Player(2) }));
+                    }
+                    if has_tag(&name.client_tag_name) {
+                        stoc_messages.push(stoc::Message::from(stoc::HsPlayerEnter { name: (&*name.client_tag_name).into(), pos: Netplayer::Player(3) }));
+                    }
+                    stoc_messages.push(stoc::Message::from(stoc::DuelStart));
+                },
+                gm::Message::SibylChat(chat) => stoc_messages.push(stoc::Chat::from((chat, name)).into()),
+                gm::Message::SibylReplay(sibyl) => stoc_messages.push(stoc::Message::Replay(stoc::Replay { replay: sibyl.replay.clone() })),
+                message => stoc_messages.push(stoc::Message::from(message.clone()))
+            }
+        }
+        stoc_messages
+    }
+
+    fn has_tag(name: &FixedLengthString<50>) -> bool {
+        !name.is_empty() && &**name != NO_TAG
+    }
+}
+
+#[cfg(feature = "forge")]
+pub use forge::forge_to_stoc;
+#[cfg(feature = "forge")]
+pub use forge::stoc_to_forge;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Something wrong when io")]

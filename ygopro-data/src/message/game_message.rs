@@ -1296,6 +1296,31 @@ pub struct SibylChat {
     pub msg: crate::utils::string::U16String
 }
 
+#[cfg(feature = "forge")]
+const CHAT_COLOR_PREFIX: &str = "[888888]";
+
+#[cfg(feature = "forge")]
+const CHAT_COLOR_SUFFIX: &str = "[-]";
+
+#[cfg(feature = "forge")]
+impl From<(&crate::message::server_to_client::Chat, &SibylName)> for SibylChat {
+    fn from((chat, name): (&crate::message::server_to_client::Chat, &SibylName)) -> Self {
+        Self { msg: format!("{CHAT_COLOR_PREFIX}{}:{}{CHAT_COLOR_SUFFIX}", name.speaker(chat.player), &*chat.msg).into() }
+    }
+}
+
+#[cfg(feature = "forge")]
+impl From<(&SibylChat, Option<&SibylName>)> for crate::message::server_to_client::Chat {
+    fn from((chat, name): (&SibylChat, Option<&SibylName>)) -> Self {
+        let msg = &*chat.msg;
+        let msg = msg.strip_prefix(CHAT_COLOR_PREFIX).and_then(|msg| msg.strip_suffix(CHAT_COLOR_SUFFIX)).unwrap_or(msg);
+        match (name, msg.split_once(':')) {
+            (Some(name), Some((speaker, msg))) => Self { player: name.player(speaker), msg: msg.into() },
+            _ => Self { player: Color::Babyblue.into(), msg: msg.into() }
+        }
+    }
+}
+
 #[binrw]
 #[derive(Debug, Clone, Message, GameMessage)]
 #[message(gm, flag = 231)]
@@ -1318,6 +1343,30 @@ pub struct SibylName {
     #[br(map = |v: u32| u8::try_from(v).ok().and_then(|v| MasterRule::try_from(v).ok()).unwrap_or(MasterRule::MasterRule1))]
     #[bw(map = |v: &MasterRule| u8::from(*v) as u32)]
     pub master_rule: MasterRule
+}
+
+#[cfg(feature = "forge")]
+impl SibylName {
+    fn speaker(&self, player: crate::message::server_to_client::ChatSource) -> &str {
+        match player {
+            crate::message::server_to_client::ChatSource::Player(Netplayer::Player(0)) => &self.host_name,
+            crate::message::server_to_client::ChatSource::Player(Netplayer::Player(1)) => &self.client_name,
+            crate::message::server_to_client::ChatSource::Player(Netplayer::Player(2)) => &self.host_tag_name,
+            crate::message::server_to_client::ChatSource::Player(Netplayer::Player(3)) => &self.client_tag_name,
+            crate::message::server_to_client::ChatSource::System(_) => "[System]",
+            _ => "[---]"
+        }
+    }
+
+    fn player(&self, speaker: &str) -> crate::message::server_to_client::ChatSource {
+        for (index, name) in [(0, &*self.host_name), (1, &*self.client_name), (2, &*self.host_tag_name), (3, &*self.client_tag_name)] {
+            if name == speaker { return Netplayer::Player(index).into() }
+        }
+        match speaker {
+            "[System]" => Color::Lightblue.into(),
+            _ => Netplayer::Observer(255).into()
+        }
+    }
 }
 
 #[binrw]
