@@ -161,7 +161,7 @@ pub struct UpdateData {
     pub location: Location,
     #[br(parse_with=until_eof)]
     #[mask]
-    #[mask_if(self.player != player)]
+    #[mask_if(self.player != player && self.data.should_mask(player))]
     pub data: Vec<UpdateCardInfo>
 }
 

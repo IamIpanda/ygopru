@@ -391,7 +391,11 @@ impl PlayerTransformer {
         if player == current || player == current_opponent {
             self.team_to_core_player(player.team())
         } else {
-            CorePlayer::Rule
+            match self.team_to_core_player(player.team()) {
+                CorePlayer::FirstAttackPlayer => CorePlayer::None,
+                CorePlayer::SecondAttackPlayer => CorePlayer::Rule,
+                _ => unreachable!(),
+            }
         }
     }
 }

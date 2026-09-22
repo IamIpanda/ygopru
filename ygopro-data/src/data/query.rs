@@ -176,20 +176,20 @@ pub enum UpdateCardInfo {
 
 impl GameMessage for UpdateCardInfo {
     fn mask(&mut self) {
-        if !self.should_mask(CorePlayer::None) { return }
+        if !self.should_mask(CorePlayer::All) { return }
         if let UpdateCardInfo::Data(data) = self {
             data.fill(QueryData::Clear);
         }
     }
 
-    fn should_mask(&self, _player: CorePlayer) -> bool {
-        let data = match self {
-            UpdateCardInfo::Data(data) => data,
-            _ => return false
-        };
-        data.iter().find_map(|q| if let QueryData::Position(p) = q { 
-            Some(p.should_mask()) 
-        } else { None }).unwrap_or(false)
+    fn should_mask(&self, player: CorePlayer) -> bool {
+        let UpdateCardInfo::Data(data) = self else { return false };
+        let Some(position) = data.iter().find_map(|query| match query {
+            QueryData::Position(position) => Some(position),
+            _ => None,
+        }) else { return false };
+        let teammate = matches!((position.controller, player), (CorePlayer::FirstAttackPlayer, CorePlayer::None) | (CorePlayer::SecondAttackPlayer, CorePlayer::Rule));
+        position.should_mask() && position.controller != player && (!teammate || !position.location.intersects(Location::OnField | Location::Removed))
     }
 }
 
