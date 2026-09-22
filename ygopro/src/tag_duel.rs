@@ -515,6 +515,10 @@ pub mod ygopro_handlers {
     #[handler(ctos::Chat)]
     #[register_to(TAG_DUEL_YGOPRO_HANDLERS)]
     fn on_chat(duel: &mut TagDuel, player: Netplayer, chat: &ctos::Chat) {
+        let player = match (duel.first_attack_team, player) {
+            (Some(TeamIndex::Team2), Netplayer::Player(index)) => Netplayer::Player(index ^ 2),
+            _ => player,
+        };
         let chat = stoc::Chat { player: player.into(), msg: chat.msg.clone() };
         duel.sender.send(chat.into(), SendTarget::All);
     }
