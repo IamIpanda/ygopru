@@ -164,14 +164,19 @@ unsafe extern "C" {
     ///
     /// See also: [ygopro-core docs](https://github.com/Fluorohydride/ygopro-core/blob/master/README.md).
     pub fn preload_script(pduel: intptr_t, script_name: *const c_char) -> i32;
+
+    /// Borrow the lua state the core created for the duel.
+    pub fn ygocore_lua_state(pduel: intptr_t) -> *mut mlua::ffi::lua_State;
 }
 
 /// A ygocore duel wrapper, which handles the raw FFI bindings.
 pub struct Duel {
     duel_pointer: intptr_t,
     shuffler: random::MTRandom,
+    /// The core's lua state.
+    pub lua: mlua::Lua,
     /// Whether the duel has finished.
-    pub ended: bool
+    pub ended: bool,
 }
 
 static DUEL_LIFECYCLE_LOCK: Mutex<()> = Mutex::new(());
@@ -194,7 +199,8 @@ impl Duel {
             DuelSeed::Complicated(seq) => (unsafe { create_duel_v2(seq.as_ptr()) }, seq),
         };
         let shuffler = random::MTRandom::new(DuelSeed::Complicated(seed_array));
-        Self { duel_pointer, shuffler, ended: false }
+        let lua = unsafe { mlua::Lua::get_or_init_from_ptr(ygocore_lua_state(duel_pointer)) }.clone();
+        Self { duel_pointer, shuffler, ended: false, lua }
     }
 
     /// Start the duel with the given [`DuelOptions`] and [`MasterRule`].
@@ -380,4 +386,34 @@ pub struct ProcessResult {
 
 #[cfg(test)]
 mod tests {
+    use super::Duel;
+    use super::DuelSeed;
+
+    #[test]
+    fn mlua_binds_to_the_core_lua() {
+        let lua = mlua::Lua::new();
+        assert_eq!(lua.load("return 1 + 1").eval::<i32>().unwrap(), 2);
+    }
+
+    #[test]
+    fn duel_lua_is_the_core_state() {
+        let duel = Duel::new(DuelSeed::Single(42));
+        let duel_table: mlua::Table = duel.lua.globals().get("Duel").unwrap();
+        let get_lp: mlua::Function = duel_table.get("GetLP").unwrap();
+        assert_eq!(get_lp.call::<i32>(0).unwrap(), 8000);
+    }
+
+    #[test]
+    fn duel_lua_replaces_a_core_api() {
+        let duel = Duel::new(DuelSeed::Single(42));
+        let duel_table: mlua::Table = duel.lua.globals().get("Duel").unwrap();
+        let original: mlua::Function = duel_table.get("GetLP").unwrap();
+        let wrapper = duel.lua.create_function(move |_, player: i32| {
+            let real: i32 = original.call(player)?;
+            Ok(real + 1000)
+        }).unwrap();
+        duel_table.set("GetLP", wrapper).unwrap();
+        let get_lp: mlua::Function = duel_table.get("GetLP").unwrap();
+        assert_eq!(get_lp.call::<i32>(0).unwrap(), 9000);
+    }
 }
