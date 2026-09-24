@@ -31,6 +31,7 @@ pub type intptr_t = isize;
 
 pub mod constants;
 pub mod random;
+pub mod lua;
 pub use constants::*;
 pub use random::DuelSeed;
 

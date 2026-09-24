@@ -296,6 +296,8 @@ impl Sender {
 
 /// The request sent to [`Duel`] in actor model.
 pub enum Request {
+	/// Register a Rust Lua callback on the actor's current core.
+	RegisterLuaFunction(crate::host::LuaRegistrationRequest),
     /// A standard [`ctos::Message`].
     Message(ygopro_handlers::Request),
     /// A extended internal [`ygopro::Message`](crate::message::Message).

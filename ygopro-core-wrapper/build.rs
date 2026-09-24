@@ -74,6 +74,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", ocgcore_dir.display());
     println!("cargo:rerun-if-changed={}", lua_dir.display());
     println!("cargo:rerun-if-changed=src/random.cpp");
+	println!("cargo:rerun-if-changed=src/lua.cpp");
 
     if !ocgcore_dir.exists() {
         panic!(
@@ -122,6 +123,7 @@ fn main() {
     }
 
     build.file(root.join("src").join("random.cpp"));
+	build.file(root.join("src").join("lua.cpp"));
 
     build.compile(lib_name);
 }

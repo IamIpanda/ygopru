@@ -36,7 +36,88 @@ pub struct DuelHost {
     pub finished_sender: watch::Sender<bool>,
 }
 
+/// Failure to replace a Lua function through a duel host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LuaRegistrationError {
+	/// The duel actor stopped before acknowledging the request.
+	HostClosed,
+	/// The core rejected registration.
+	Core(ygopro_core_wrapper::lua::RegistrationError),
+}
+
+impl std::fmt::Display for LuaRegistrationError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Lua registration failed: {self:?}")
+	}
+}
+
+impl std::error::Error for LuaRegistrationError {}
+
+/// An opaque registration request constructed by [`DuelHost::register_lua_function`].
+/// Private fields ensure that only an unsafe registration can supply callbacks.
+pub struct LuaRegistrationRequest {
+	table: String,
+	name: String,
+	callback: ygopro_core_wrapper::lua::Function,
+	reply: tokio::sync::oneshot::Sender<Result<(), LuaRegistrationError>>,
+}
+
+impl LuaRegistrationRequest {
+	pub(crate) fn apply(self, duel: &mut crate::duel::Duel) {
+		// The host caller guarantees callback safety for the duel's lifetime.
+		let result = unsafe {
+			duel.core.register_lua_function(&self.table, &self.name, self.callback)
+		}.map_err(LuaRegistrationError::Core);
+		let _ = self.reply.send(result);
+	}
+}
+
 impl DuelHost {
+	/// Replace a Lua API on the duel actor and wait for registration to finish.
+	///
+	/// Call this before accepting clients / starting play. No Lua state pointer
+	/// leaves the actor. An empty table name selects a global function.
+	/// This affects the current core only: match siding recreates the core, so
+	/// replacements must be registered again for the next duel. Existing Lua
+	/// references to the original function are unaffected.
+	///
+	/// Dropping the future after enqueueing does not cancel registration.
+	///
+	/// # Example
+	///
+	/// ```no_run
+	/// use ygopro::DuelHost;
+	/// use ygopro_core_wrapper::lua;
+	///
+	/// unsafe extern "C" fn get_lp(state: *mut lua::State) -> std::ffi::c_int {
+	/// 	unsafe { lua::push_integer(state, 12345) };
+	/// 	1
+	/// }
+	///
+	/// # async fn example(host: &DuelHost) -> Result<(), ygopro::host::LuaRegistrationError> {
+	/// unsafe { host.register_lua_function("Duel", "GetLP", get_lp).await? };
+	/// # Ok(())
+	/// # }
+	/// ```
+	///
+	/// # Safety
+	/// The callback must satisfy all safety requirements of
+	/// [`ygopro_core_wrapper::Duel::register_lua_function`], including no panic,
+	/// Lua error, or yield through Rust frames. It executes on the actor's thread,
+	/// which may differ from the caller's thread. Its code must remain loaded
+	/// until the duel ends, even if this future is cancelled.
+	pub async unsafe fn register_lua_function(&self, table: &str, name: &str,
+		callback: ygopro_core_wrapper::lua::Function) -> Result<(), LuaRegistrationError> {
+		let (reply, response) = tokio::sync::oneshot::channel();
+		self.ctos_sender.send(Request::RegisterLuaFunction(LuaRegistrationRequest {
+			table: table.to_owned(),
+			name: name.to_owned(),
+			callback,
+			reply,
+		})).map_err(|_| LuaRegistrationError::HostClosed)?;
+		response.await.map_err(|_| LuaRegistrationError::HostClosed)?
+	}
+
     /// Create a duel by target HostInfo and Configuration.
     pub fn new(host_info: HostInfo, configuration: Configuration) -> Self {
         let (request_sender, handle) = if host_info.mode == Mode::Tag {

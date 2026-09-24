@@ -94,6 +94,7 @@ impl SingleDuel {
 
             while let Some(request) = stream.next().await {
                 match request {
+					Request::RegisterLuaFunction(request) => request.apply(&mut duel.duel),
                     Request::Message(request) => {
                         if !duel.get_net(request.extra).map_or(true, |p| p.state.allowed(&request.message)) {
                             warn!("Message type mismatch for player: {:?}, get {:?}", request.extra, ctos::MessageType::from(&request.message));
