@@ -47,12 +47,9 @@ registry_already_has() {
   [[ "$status_code" == "200" ]]
 }
 
-read_upstream_ref() {
-  local crate_directory="$1"
-  local upstream_directory="$crate_directory/ocgcore"
-  if [[ -d "$upstream_directory/.git" || -f "$upstream_directory/.git" ]]; then
-    git -C "$upstream_directory" rev-parse HEAD 2>/dev/null
-  fi
+read_core_commit() {
+  local core_directory="$1"
+  git -C "$core_directory" rev-parse HEAD 2>/dev/null || true
 }
 
 set_package_version() {
@@ -81,15 +78,21 @@ prepare_upstream_suffixes() {
     local entry_rest="${entry#*|}"
     local crate_directory="${entry_rest%%|*}"
     local crate_version="${entry_rest#*|}"
-    local upstream_ref
-    upstream_ref="$(read_upstream_ref "$crate_directory")"
-    if [[ -n "$upstream_ref" ]]; then
-      crate_version="${crate_version%%+*}+official.${upstream_ref:0:8}"
+    local core_directory="$crate_directory/official/ocgcore"
+    if [[ -d "$core_directory" ]]; then
+      if [[ ! -d "$core_directory/.git" && ! -f "$core_directory/.git" ]]; then
+        echo "official core submodule of $crate_name is not checked out at $core_directory" >&2
+        exit 1
+      fi
+      local core_commit
+      core_commit="$(read_core_commit "$core_directory")"
+      if [[ -z "$core_commit" ]]; then
+        echo "cannot read HEAD commit of $core_directory" >&2
+        exit 1
+      fi
+      crate_version="${crate_version%%+*}+${core_commit:0:10}"
       set_package_version "$crate_directory/Cargo.toml" "$crate_version"
       echo "upstream $crate_name labeled $crate_version"
-    elif [[ -d "$crate_directory/ocgcore/.git" || -f "$crate_directory/ocgcore/.git" ]]; then
-      echo "cannot read upstream commit for $crate_name at $crate_directory/ocgcore" >&2
-      exit 1
     fi
     prepared_entries+=("$crate_name|$crate_directory|$crate_version")
   done
@@ -109,7 +112,7 @@ publish_one() {
     if registry_already_has "$crate_name" "$crate_version"; then
       return 0
     fi
-    failure_logs["$crate_name"]="version conflict: a different $crate_name with the same base version is on crates.io; bump the version before the +official suffix"
+    failure_logs["$crate_name"]="crates.io already holds the base version ${crate_version%%+*}: crates.io stores versions without build metadata, so bump the base version in $crate_name/Cargo.toml. cargo said: $publish_log"
     return 1
   fi
   failure_logs["$crate_name"]="$publish_log"
