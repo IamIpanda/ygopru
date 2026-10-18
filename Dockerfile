@@ -1,5 +1,6 @@
 FROM messense/rust-musl-cross:x86_64-musl AS build
 ARG PROXY
+ARG FLAVOR=official
 ENV http_proxy=$PROXY \
     https_proxy=$PROXY \
     HTTP_PROXY=$PROXY \
@@ -7,7 +8,8 @@ ENV http_proxy=$PROXY \
 
 WORKDIR /workspace
 COPY . .
-RUN cargo build --release --target x86_64-unknown-linux-musl --workspace
+RUN if [ "$FLAVOR" = "koishi" ]; then FEATURES="--features ygopro/koishi"; else FEATURES=""; fi \
+    && cargo build --release --target x86_64-unknown-linux-musl --workspace $FEATURES
 
 FROM alpine:latest
 WORKDIR /ygopro

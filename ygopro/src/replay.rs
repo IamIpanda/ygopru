@@ -244,4 +244,90 @@ impl RoomProvider<Complex<ctos::Message>, Complex<stoc::Message>> for ReplayHost
     }
 }
 
+#[cfg(feature = "forge")]
+mod forge {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use futures::Stream;
+    use tokio::sync::mpsc;
+    use tokio::sync::watch;
+    use tokio_stream::wrappers::UnboundedReceiverStream;
+
+    use ygopro_data::complex::Complex;
+    use ygopro_data::constants::Netplayer;
+    use ygopro_data::message::ctos;
+    use ygopro_data::message::forge_to_stoc;
+    use ygopro_data::message::gm;
+    use ygopro_data::message::gm::GameMessage;
+    use ygopro_data::message::stoc;
+    use ygopro_handler::RoomProvider;
+
+    /// Play a forge replay, which stores the messages of a duel instead of the
+    /// responses it was driven by.
+    ///
+    /// Nothing is re-simulated here: the stored messages are turned back into the
+    /// stoc stream a client plays, so the host needs neither a core duel nor a
+    /// [`crate::DuelHost`]. The stream starts with the join response and the player
+    /// entrances the stored names allow, and the messages asking a duelist to choose
+    /// are dropped, because an observer is never the one to answer them.
+    pub struct ForgeReplayHost {
+        replay: ygopro_data::data::forge::Replay,
+        finished_sender: watch::Sender<bool>,
+    }
+
+    impl ForgeReplayHost {
+        /// Prepare the messages of `replay` for every observer that joins.
+        pub fn new(replay: ygopro_data::data::forge::Replay) -> Self {
+            let (finished_sender, _) = watch::channel(false);
+            Self { replay, finished_sender }
+        }
+
+        fn play(&self) -> UnboundedReceiverStream<Complex<stoc::Message>> {
+            let chosen: Vec<gm::Message> = self.replay.messages.iter().filter(|message| message.waiting_for().is_none()).cloned().collect();
+            let mut messages = forge_to_stoc(&chosen);
+            messages.insert(1, stoc::Message::from(stoc::TypeChange { player: Netplayer::Observer(255), host: false }));
+            let finished_sender = self.finished_sender.clone();
+            let (sender, receiver) = mpsc::unbounded_channel();
+            tokio::spawn(async move {
+                for message in messages {
+                    sender.send(Complex::from_message(message)).ok();
+                }
+                finished_sender.send(true).ok();
+            });
+            UnboundedReceiverStream::new(receiver)
+        }
+    }
+
+    impl RoomProvider<ctos::Message, Complex<stoc::Message>> for ForgeReplayHost {
+        type ServerToClientStream = UnboundedReceiverStream<Complex<stoc::Message>>;
+        type FinishFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+        fn add(&mut self, _client_to_server_stream: impl Stream<Item = ctos::Message> + Unpin + Send + 'static) -> Self::ServerToClientStream {
+            self.play()
+        }
+
+        fn get_finish_signal(&mut self) -> Self::FinishFuture {
+            let mut finished = self.finished_sender.subscribe();
+            Box::pin(async move { let _ = finished.wait_for(|finished| *finished).await; })
+        }
+    }
+
+    impl RoomProvider<Complex<ctos::Message>, Complex<stoc::Message>> for ForgeReplayHost {
+        type ServerToClientStream = UnboundedReceiverStream<Complex<stoc::Message>>;
+        type FinishFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+        fn add(&mut self, _client_to_server_stream: impl Stream<Item = Complex<ctos::Message>> + Unpin + Send + 'static) -> Self::ServerToClientStream {
+            self.play()
+        }
+
+        fn get_finish_signal(&mut self) -> Self::FinishFuture {
+            <ForgeReplayHost as RoomProvider<ctos::Message, Complex<stoc::Message>>>::get_finish_signal(self)
+        }
+    }
+}
+
+#[cfg(feature = "forge")]
+pub use forge::ForgeReplayHost;
+
 

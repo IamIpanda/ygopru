@@ -63,14 +63,26 @@ impl Configuration {
     }
 
     /// Enable a plugin by its module path and provide a configuration for it.
-    pub fn enable_plugin_with_configuration<PluginConfiguration>(&mut self, plugin_name: &str, configuration: PluginConfiguration) where PluginConfiguration: Clone + Send + 'static {
+    pub fn enable_plugin_with_configuration<PluginConfiguration: Clone + Send + 'static>(&mut self, plugin_name: &str, configuration: PluginConfiguration) {
         self.enable_plugins.insert(plugin_name.to_string());
         self.configurations.insert(configuration);
     }
 
+    /// Enable a plugin by its module path, but using a inited configuration which may already exists.
+    pub fn enable_plugin_with_inited<PluginConfiguration: Clone + Send + 'static>(&mut self, plugin_name: &str, configuration: impl FnOnce(anymap3::OccupiedEntry<'_, dyn anymap3::CloneAny + Send, PluginConfiguration>)) {
+        if !self.enable_plugins.contains(plugin_name) {
+            self.enable_plugin(plugin_name);
+        }
+        match self.configurations.entry::<PluginConfiguration>() {
+            anymap3::Entry::Occupied(occupied) => configuration(occupied),
+            anymap3::Entry::Vacant(_) => log::warn!("plugin {plugin_name} has no configuration"),
+        }
+    }
+
     /// Disable a plugin by its module path.
     /// The configuration of the plugin will be remained from the configuration map.
-    pub fn disable_plugin(&mut self, plugin_name: &str) {
+    pub fn disable_plugin<PluginConfiguration: Clone + Send + 'static>(&mut self, plugin_name: &str) -> Option<PluginConfiguration> {
         self.enable_plugins.remove(plugin_name);
+        self.configurations.remove::<PluginConfiguration>()
     }
 }

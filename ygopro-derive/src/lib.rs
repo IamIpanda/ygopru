@@ -432,12 +432,13 @@ pub fn after(attr: TokenStream, item: TokenStream) -> TokenStream {
     dispatch(attr, item, |priority| 128u8 + priority.unwrap_or(1))
 }
 
-/// Turns a function into a command handler, keyed by the function name.
+/// Turns a function into a command handler, keyed by a name.
 ///
 /// A command is like a handler, but instead of a protocol message it is
 /// triggered by a name: `duel.queue_command("my_command", payload)` looks up
-/// the handler registered for that name. The command name is the function
-/// name itself, so no key argument is accepted; the priority is always `128`.
+/// the handler registered for that name. The name defaults to the function
+/// name, `name` overrides it, and `module` overrides the module the command
+/// belongs to.
 ///
 /// Like the handler macros, `#[command]` must be stacked with
 /// [`register_to`], which names the target slice. The slice is expected to
@@ -446,6 +447,16 @@ pub fn after(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// ```text
 /// #[command]
+/// #[register_to(crate::command::COMMANDS as crate::command::CommandHandler with &'static str)]
+/// fn timer_tick(duel: &mut Duel, attachment: &mut TimeLimit) -> &'static str {
+///     // ...
+/// }
+/// ```
+///
+/// With an explicit name, and a module of its own:
+///
+/// ```text
+/// #[command(name = "tick", module = "some::module")]
 /// #[register_to(crate::command::COMMANDS as crate::command::CommandHandler with &'static str)]
 /// fn timer_tick(duel: &mut Duel, attachment: &mut TimeLimit) -> &'static str {
 ///     // ...
@@ -464,9 +475,9 @@ pub fn after(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let _ = attr;
+    let attr = parse_macro_input!(attr as AttributeArgs);
     let function = parse_macro_input!(item as ItemFn);
-    command::command_impl(function).into()
+    command::command_impl(attr, function).into()
 }
 
 fn dispatch(attr: TokenStream, item: TokenStream, transform_priority: impl Fn(Option<u8>) -> u8) -> TokenStream {

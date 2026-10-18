@@ -6,7 +6,20 @@ on:
 
 jobs:
   build-and-push:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Official core
+            flavor: official
+            suffix: ""
+            alias: latest
+          - name: Koishi core
+            flavor: koishi
+            suffix: "-koishi"
+            alias: koishi-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,6 +46,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            FLAVOR=${{ matrix.flavor }}
           tags: |
-            iami/ygopru:${{ steps.version.outputs.version }}
-            iami/ygopru:latest
+            iami/ygopru:${{ steps.version.outputs.version }}${{ matrix.suffix }}
+            iami/ygopru:${{ matrix.alias }}

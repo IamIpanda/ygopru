@@ -24,6 +24,7 @@ use ygopro_data::data::UpdateCardInfo;
 use ygopro_data::message::HostInfo;
 use ygopro_data::message::gm::GameMessage;
 use ygopro_data::message::gm::MaskedClone;
+use ygopro_data::message::stoc_to_forge;
 use ygopro_data::message::{ctos, stoc, gm};
 use ygopro_data::message::gm::CardCode;
 use ygopro_data::string::FixedLengthString;
@@ -304,7 +305,8 @@ pub enum Request {
     /// That should be a command, but too important.
     Evolve,
     /// A custom command.
-    Command { name: &'static str, arguments: Option<Box<dyn Any + Send>> }
+    Command { name: &'static str, arguments: Option<Box<dyn Any + Send>> },
+    Query(Box<dyn FnOnce(&mut Duel, &mut anymap3::Map<dyn Any + Send>) + Send>)
 }
 
 type BaseDuelPlayer = crate::player::BaseDuelPlayer<Complex<stoc::Message>>;
@@ -504,33 +506,9 @@ impl Duel {
 
     #[cfg(feature = "forge")]
     pub fn create_replay_forge(&self, masked: bool) -> Option<ygopro_data::data::forge::Replay> {
-        let is_tag = self.host_info.mode == Mode::Tag;
-        let host_player = self.get(PlayerIndex::Player1)?;
-        let client_player = self.get(if is_tag { PlayerIndex::Player4 } else { PlayerIndex::Player2 })?;
-        let tag_host_player = if is_tag { Some(self.get(PlayerIndex::Player2)?) } else { None };
-        let tag_client_player = if is_tag { Some(self.get(PlayerIndex::Player3)?) } else { None };
         let recorded = if masked { &self.sender.masked_messages } else { &self.sender.messages };
-        let start = recorded.iter().rposition(|message| matches!(message.try_get(), Ok(stoc::Message::DuelStart(_))))?;
-        let mut messages = Vec::with_capacity(recorded.len() - start + 1);
-        messages.push(gm::SibylName {
-            host_name: (&*host_player.name).into(),
-            host_tag_name: tag_host_player.map_or(FixedLengthString::allocate(), |player| (&*player.name).into()),
-            host_current_name: (&*host_player.name).into(),
-            client_name: (&*client_player.name).into(),
-            client_tag_name: tag_client_player.map_or(FixedLengthString::allocate(), |player| (&*player.name).into()),
-            client_current_name: (&*client_player.name).into(),
-            master_rule: self.host_info.duel_rule,
-        }.into());
-        for message in &recorded[start..] {
-            let Ok(message) = message.try_get() else { continue };
-            match message {
-                stoc::Message::GameMessage(game_message) => messages.push(game_message.message.clone().into()),
-                stoc::Message::Chat(chat) => messages.push(gm::SibylChat { msg: chat.msg.clone() }.into()),
-                stoc::Message::Replay(replay) => messages.push(gm::SibylReplay { replay: replay.replay.clone() }.into()),
-                _ => (),
-            }
-        }
-        Some(ygopro_data::data::forge::Replay { messages })
+        if !recorded.iter().any(|message| matches!(message.try_get(), Ok(stoc::Message::DuelStart(_)))) { return None }
+        Some(ygopro_data::data::forge::Replay { messages: stoc_to_forge(recorded) })
     }
 
     pub fn create_replay(&self) -> Option<Replay> {

@@ -456,6 +456,7 @@ fn on_hs_start(duel: &mut Duel, player: Netplayer) {
         return;
     }
 
+    #[allow(unused_variables)]
     let (deck1_main, deck1_side, deck1_extra, deck2_main, deck2_side, deck2_extra) = {
         let player1 = match duel.players[0].as_ref() { Some(p) => p, None => { warn!("HsStart: player1 missing"); return; } };
         let player2 = match duel.players[1].as_ref() { Some(p) => p, None => { warn!("HsStart: player2 missing"); return; } };
@@ -479,13 +480,15 @@ fn on_hs_start(duel: &mut Duel, player: Netplayer) {
         observer.state = AllowMessage::None;
     }
 
+    // The ygopro client initializes the side deck into the banished zone, which shows unexpected cards before the duel starts.
+    // This looks like a client bug, but we follow the vanilla implementation and send 0, which does not match the field semantics.
     let player1_count = stoc::DeckCount {
-        mainc_s: deck1_main, sidec_s: deck1_side, extrac_s: deck1_extra,
-        mainc_o: deck2_main, sidec_o: deck2_side, extrac_o: deck2_extra,
+        mainc_s: deck1_main, sidec_s: 0, extrac_s: deck1_extra,
+        mainc_o: deck2_main, sidec_o: 0, extrac_o: deck2_extra,
     };
     let player2_count = stoc::DeckCount {
-        mainc_s: deck2_main, sidec_s: deck2_side, extrac_s: deck2_extra,
-        mainc_o: deck1_main, sidec_o: deck1_side, extrac_o: deck1_extra,
+        mainc_s: deck2_main, sidec_s: 0, extrac_s: deck2_extra,
+        mainc_o: deck1_main, sidec_o: 0, extrac_o: deck1_extra,
     };
     duel.sender.send(player1_count.into(), SendTarget::Single(Netplayer::Player(0)));
     duel.sender.send(player2_count.into(), SendTarget::Single(Netplayer::Player(1)));
@@ -628,9 +631,15 @@ fn on_client_join_final(join: &mut ygopro::ClientJoin) {
 
 #[handler(ygopro::GenerateReplay)]
 #[register_to(YGOPRO_HANDLERS_EX as HandlerEx)]
-fn on_generate_replay(duel: &mut Duel) -> Option<stoc::Message> {
-    let replay = duel.create_replay()?;
-    Some(stoc::Replay { replay: Box::new(replay) }.into())
+fn on_generate_replay(duel: &mut Duel, states: &mut anymap3::Map<dyn std::any::Any + Send>) {
+    let Some(replay) = duel.create_replay() else { return };
+    states.insert(stoc::Replay { replay: Box::new(replay) });
+}
+
+#[handler(ygopro::GenerateReplay, priority = 255)]
+#[register_to(YGOPRO_HANDLERS_EX as HandlerEx)]
+fn on_generate_replay_final(states: &mut anymap3::Map<dyn std::any::Any + Send>) -> Option<stoc::Message> {
+    Some(states.remove::<stoc::Replay>()?.into())
 }
 
 #[handler(ygopro::DuelEnd)]

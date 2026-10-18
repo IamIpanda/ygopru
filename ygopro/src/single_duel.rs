@@ -178,6 +178,7 @@ impl SingleDuel {
                             _ => ()
                         };
                     },
+                    Request::Query(query) => query(&mut duel.duel, &mut states),
                 }
             }
             duel.run_processor(&ygopro_ex_processor, crate::ygopro_handlers::RequestEx { 
@@ -478,11 +479,11 @@ pub mod ygopro_handlers {
 
     #[after(ygopro::GenerateReplay)]
     #[register_to(SINGLE_DUEL_YGOPRO_HANDLERS_EX as HandlerEx)]
-    fn on_generate_replay(duel: &mut SingleDuel, response: &mut crate::ygopro_handlers::Response) {
+    fn on_generate_replay(duel: &mut SingleDuel, states: &mut anymap3::Map<dyn std::any::Any + Send>) {
         if duel.first_attack_player != Some(PlayerIndex::Player2) {
             return;
         }
-        let crate::ygopro_handlers::Response::Replace(stoc::Message::Replay(message)) = response else { return };
+        let Some(message) = states.get_mut::<stoc::Replay>() else { return };
         std::mem::swap(&mut message.replay.body.host_name, &mut message.replay.body.client_name);
         std::mem::swap(&mut message.replay.body.host_deck, &mut message.replay.body.client_deck);
     }

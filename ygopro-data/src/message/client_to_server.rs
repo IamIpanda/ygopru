@@ -5,6 +5,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
+use std::net::Ipv4Addr;
+
 use binrw::BinRead;
 use binrw::BinWrite;
 use ygopro_derive::Message;
@@ -108,6 +110,16 @@ impl<'s> From<&'s str> for Chat {
     fn from(value: &'s str) -> Self {
         Self { msg: value.into() }
     }
+}
+
+#[derive(BinRead, BinWrite, Debug, Clone, Message)]
+#[message(ctos, flag = 23)]
+#[repr(C)]
+pub struct ExternalAddress {
+    #[br(big, map = |raw: u32| Ipv4Addr::from(raw))]
+    #[bw(big, map = |ip: &Ipv4Addr| u32::from(*ip))]
+    pub real_ip: Ipv4Addr,
+    pub hostname: U16String
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]

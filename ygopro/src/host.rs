@@ -31,7 +31,7 @@ use crate::tag_duel::TagDuel;
 /// 
 /// DuelHost keeps a mpsc sender from Duel Instance, and implement the [`RoomProvider`].
 pub struct DuelHost {
-    pub(crate) ctos_sender: mpsc::UnboundedSender<Request>,
+    pub ctos_sender: mpsc::UnboundedSender<Request>,
     /// Get a signal that only sent once when duel ends.
     pub finished_sender: watch::Sender<bool>,
 }

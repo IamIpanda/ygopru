@@ -95,6 +95,7 @@ fn write_file(name: OsString, content: String) {
 }
 
 fn main() -> io::Result<()>{
+    println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FORGE");
     let path = std::env::var_os("CARGO_MANIFEST_DIR").expect("cannot find cargo manifest directory");
     scan_dir(PathBuf::from(path).join("src").into_os_string()).ok();

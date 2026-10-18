@@ -239,6 +239,7 @@ impl TagDuel {
                             _ => ()
                         };
                     },
+                    Request::Query(query) => query(&mut duel.duel, &mut states),
                 }
             }
             duel.run_processor(&ygopro_ex_processor, crate::ygopro_handlers::RequestEx { 
@@ -542,14 +543,17 @@ pub mod ygopro_handlers {
         }
         let team1_deck = duel.get(TeamIndex::Team1.leader()).map(|p| (p.deck.main.len(), p.deck.side.len(), p.deck.extra.len()));
         let team2_deck = duel.get(TeamIndex::Team2.leader()).map(|p| (p.deck.main.len(), p.deck.side.len(), p.deck.extra.len()));
+        #[allow(unused_variables)]
         let (Some((team1_main, team1_side, team1_extra)), Some((team2_main, team2_side, team2_extra))) = (team1_deck, team2_deck) else { return };
+        // The ygopro client initializes the side deck into the banished zone, which shows unexpected cards before the duel starts.
+        // This looks like a client bug, but we follow the vanilla implementation and send 0, which does not match the field semantics.
         let team1_count = stoc::DeckCount {
-            mainc_s: team1_main as u16, sidec_s: team1_side as u16, extrac_s: team1_extra as u16,
-            mainc_o: team2_main as u16, sidec_o: team2_side as u16, extrac_o: team2_extra as u16,
+            mainc_s: team1_main as u16, sidec_s: 0, extrac_s: team1_extra as u16,
+            mainc_o: team2_main as u16, sidec_o: 0, extrac_o: team2_extra as u16,
         };
         let team2_count = stoc::DeckCount {
-            mainc_s: team2_main as u16, sidec_s: team2_side as u16, extrac_s: team2_extra as u16,
-            mainc_o: team1_main as u16, sidec_o: team1_side as u16, extrac_o: team1_extra as u16,
+            mainc_s: team2_main as u16, sidec_s: 0, extrac_s: team2_extra as u16,
+            mainc_o: team1_main as u16, sidec_o: 0, extrac_o: team1_extra as u16,
         };
         for player in TeamIndex::Team1.member() {
             duel.sender.send(team1_count.clone().into(), SendTarget::Single(player.into()));
@@ -697,11 +701,11 @@ pub mod ygopro_handlers {
 
     #[after(ygopro::GenerateReplay)]
     #[register_to(TAG_DUEL_YGOPRO_HANDLERS_EX as HandlerEx)]
-    fn on_generate_replay(duel: &mut TagDuel, response: &mut crate::ygopro_handlers::Response) {
+    fn on_generate_replay(duel: &mut TagDuel, states: &mut anymap3::Map<dyn std::any::Any + Send>) {
         if duel.first_attack_team != Some(TeamIndex::Team2) {
             return;
         }
-        let crate::ygopro_handlers::Response::Replace(stoc::Message::Replay(message)) = response else { return };
+        let Some(message) = states.get_mut::<stoc::Replay>() else { return };
         std::mem::swap(&mut message.replay.body.host_name, message.replay.body.tag_client_name.as_mut().unwrap());
         std::mem::swap(message.replay.body.tag_host_name.as_mut().unwrap(), &mut message.replay.body.client_name);
         std::mem::swap(&mut message.replay.body.host_deck, message.replay.body.tag_client_deck.as_mut().unwrap());

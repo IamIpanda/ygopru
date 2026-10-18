@@ -50,7 +50,7 @@ pub static NAME: &'static str = module_path!();
 
 #[derive(Attachment)]
 pub struct TimeLimit {
-    pub(crate) time_elapsed: u32,
+    pub time_elapsed: u32,
     timer_task: Option<tokio::task::JoinHandle<()>>,
 }
 
