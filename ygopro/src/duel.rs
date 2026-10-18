@@ -24,6 +24,7 @@ use ygopro_data::data::UpdateCardInfo;
 use ygopro_data::message::HostInfo;
 use ygopro_data::message::gm::GameMessage;
 use ygopro_data::message::gm::MaskedClone;
+#[cfg(feature = "forge")]
 use ygopro_data::message::stoc_to_forge;
 use ygopro_data::message::{ctos, stoc, gm};
 use ygopro_data::message::gm::CardCode;
