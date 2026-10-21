@@ -73,6 +73,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", ocgcore_dir.display());
     println!("cargo:rerun-if-changed={}", lua_dir.display());
+    println!("cargo:rerun-if-changed=src/lua.h");
+    println!("cargo:rerun-if-changed=src/lua.cpp");
     println!("cargo:rerun-if-changed=src/random.cpp");
 
     if !ocgcore_dir.exists() {
@@ -82,19 +84,12 @@ fn main() {
         );
     }
 
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
     let mut build = cc::Build::new();
 
     // Suppress all C/C++ warnings (GCC/Clang -w, MSVC /w), errors still fail the build
     build.warnings(false);
-
-    // Compile Lua C files
-    for entry in glob(lua_dir.join("*.c").to_str().unwrap()).unwrap() {
-        let path = entry.unwrap();
-        let filename = path.file_name().unwrap().to_str().unwrap();
-        if filename != "lua.c" && filename != "luac.c" && filename != "onelua.c" {
-            build.file(&path);
-        }
-    }
 
     // Compile ocgcore C++ files
     build.cpp(true);
@@ -102,12 +97,14 @@ fn main() {
     build.include(&ocgcore_dir);
     build.include(&lua_dir);
 
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    let wrapper = root.join("src").join("lua.h");
     if target_env == "msvc" {
+        build.flag("/FI").flag(&wrapper);
         build.flag("/TP");
         // Decode UTF-8 sources consistently regardless of the Windows code page.
         build.flag("/utf-8");
     } else {
+        build.flag("-include").flag(&wrapper);
         build.flag("-Wno-deprecated-declarations");
     }
 
@@ -121,7 +118,20 @@ fn main() {
         build.file(&path);
     }
 
+    build.file(root.join("src").join("lua.cpp"));
     build.file(root.join("src").join("random.cpp"));
 
+    let mut lua = cc::Build::new();
+    lua.warnings(false);
+    lua.include(&lua_dir);
+    for entry in glob(lua_dir.join("*.c").to_str().unwrap()).unwrap() {
+        let path = entry.unwrap();
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        if filename != "lua.c" && filename != "luac.c" && filename != "onelua.c" {
+            lua.file(&path);
+        }
+    }
+
     build.compile(lib_name);
+    lua.compile(&format!("{lib_name}-lua"));
 }
