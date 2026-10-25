@@ -291,7 +291,6 @@ pub mod i18n {
 
 /// Manage info from `lflists.conf`
 pub mod deck_manager {
-    use std::collections::HashMap;
     use std::fs;
     use std::io;
     use std::path::Path;
@@ -344,10 +343,7 @@ pub mod deck_manager {
         if !deck_manager.lflists.is_empty() {
             deck_manager.lflists.push(LFList {
                 hash: 0,
-                name: "N/A".to_string(),
-                content: HashMap::new(),
-                genesys: 0,
-                glist: HashMap::new(),
+                ..LFList::new("N/A".to_string())
             });
         }
         set_global(deck_manager);

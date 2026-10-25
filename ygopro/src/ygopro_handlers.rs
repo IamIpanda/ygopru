@@ -2,12 +2,14 @@
 
 use std::io::Cursor;
 use std::ops::{Deref, DerefMut};
+use std::sync::LazyLock;
 
 use binrw::BinWrite;
 use linkme::distributed_slice;
 use log::warn;
 use ygopro_data::constants::*;
 use ygopro_data::data::DuelOptions;
+use ygopro_data::data::LFList;
 use ygopro_data::message::{ctos, stoc};
 use ygopro_handler::extract::{ContainsMap, ContainsMapMut};
 use ygopro_handler::*;
@@ -103,6 +105,17 @@ impl<Res, TDuel> FromRequest<Request, State<TDuel>, Res> for PlayerIndex where R
         let s = Self::try_from(bundle.request.extra).ok()?;
         if s.0 as usize >= bundle.state.max_player_count { return None }
         Some(s)
+    }
+}
+
+static EMPTY_LFLIST: LazyLock<LFList> = LazyLock::new(|| LFList::new(String::new()));
+impl<'a> FromRequest<RequestEx, State<Duel>, Response> for &'a LFList {
+    fn from_request(bundle: &mut Bundle<RequestEx, State<Duel>, Response>) -> Option<Self> {
+        let deck_manager = deck_manager::load();
+        match deck_manager.get_lflist_by_hash(bundle.state.duel.host_info.lflist) {
+            Some(lflist) => Some(unsafe { &*(lflist as *const LFList) }),
+            None => Some(&EMPTY_LFLIST),
+        }
     }
 }
 
@@ -282,11 +295,7 @@ fn on_join_game(duel: &mut Duel, player: Netplayer, request: &mut Request, join_
     request.extra = pos;
     if is_creator { duel.host_player = pos; }
 
-    let deck_manager = deck_manager::load();
-    let mut join_info = duel.host_info.clone();
-    if let Some(lflist) = deck_manager.get_lflist_by_index(join_info.lflist) {
-        join_info.lflist = lflist.hash;
-    }
+    let join_info = duel.host_info.clone();
     response_messages.push(stoc::JoinGame{ info: join_info }.into());
     response_messages.push(stoc::TypeChange{ 
         player: pos,
@@ -522,43 +531,60 @@ fn on_player_info(duel: &mut Duel, player: Netplayer, player_info: &ctos::Player
 
 #[handler(ctos::HsReady)]
 #[register_to(YGOPRO_HANDLERS)]
-fn on_hs_ready(duel: &mut Duel, index: PlayerIndex) -> Vec<stoc::Message> {
+fn on_hs_ready(duel: &mut Duel, index: PlayerIndex) {
     let netplayer: Netplayer = index.into();
     if duel.stage != DuelStage::Begin {
         warn!("HsReady requested outside Begin stage");
-        return vec![];
+        return;
     }
     let no_check_deck = duel.host_info.no_check_deck;
-    let lflist_hash = duel.host_info.lflist;
-    let rule = duel.host_info.rule;
     let Some(duel_player) = duel.get_mut(index) else {
         warn!("HsReady requested by non-player");
-        return vec![];
+        return;
     };
     if duel_player.ready {
         warn!("HsReady requested but player is already ready");
-        return vec![];
+        return;
     }
-    let mut messages = vec![];
-    if !no_check_deck {
-        let deck_manager = deck_manager::load();
-        let data_manager = data_manager::load_full();
-        let lflist = deck_manager.get_lflist_by_hash(lflist_hash).cloned().unwrap_or_else(|| ygopro_data::data::LFList::new(String::new()));
-        if let Some(deck_error) = duel_player.deck_error.take() {
-            messages.push(stoc::ErrorMessage { err: ErrorMessage::DeckError(deck_error) }.into());
-        }
-        if messages.is_empty() && let Err(deck_error) = duel_player.deck.prepare(&lflist, rule, |code| data_manager.get_card(code)) {
-            messages.push(stoc::ErrorMessage { err: ErrorMessage::DeckError(deck_error) }.into());
-        }
-        if !messages.is_empty() {
-            messages.insert(0, stoc::HsPlayerChange { status: PlayerChange::new().with_state(PlayerChangeState::Notready).with_player(netplayer)}.into());
-        }
-    }
-    if messages.is_empty() {
+    if no_check_deck {
         duel_player.ready = true;
         duel.sender.send(stoc::HsPlayerChange { status: PlayerChange::new().with_state(PlayerChangeState::Ready).with_player(netplayer)}.into(), SendTarget::All);
+        return;
     }
-    messages
+    if duel_player.deck_error.is_some() {
+        duel.queue_request_ex(ygopro::SendDeckValidation { player: index });
+        return;
+    }
+    let deck = duel_player.deck.clone();
+    duel.queue_request_ex(ygopro::ValidateDeck { player: index, deck });
+}
+
+#[handler(ygopro::ValidateDeck)]
+#[register_to(YGOPRO_HANDLERS_EX as HandlerEx)]
+fn on_validate_deck(duel: &mut Duel, message: &ygopro::ValidateDeck, lflist: &LFList) {
+    let data_manager = data_manager::load_full();
+    let deck_error = message.deck.prepare(lflist, duel.host_info.rule, |code| data_manager.get_card(code)).err();
+    if let Some(duel_player) = duel.get_mut(message.player) {
+        duel_player.deck_error = deck_error;
+    }
+}
+
+#[handler(ygopro::SendDeckValidation)]
+#[register_to(YGOPRO_HANDLERS_EX as HandlerEx)]
+fn on_send_deck_validation(duel: &mut Duel, message: &ygopro::SendDeckValidation, target: &mut SendTarget) -> Vec<stoc::Message> {
+    let netplayer: Netplayer = message.player.into();
+    let Some(duel_player) = duel.get_mut(message.player) else { return vec![] };
+    if duel_player.ready { return vec![] }
+    if let Some(deck_error) = duel_player.deck_error {
+        *target = SendTarget::Single(netplayer);
+        return vec![
+            stoc::HsPlayerChange { status: PlayerChange::new().with_state(PlayerChangeState::Notready).with_player(netplayer)}.into(),
+            stoc::ErrorMessage { err: ErrorMessage::DeckError(deck_error) }.into(),
+        ];
+    }
+    duel_player.ready = true;
+    *target = SendTarget::All;
+    vec![stoc::HsPlayerChange { status: PlayerChange::new().with_state(PlayerChangeState::Ready).with_player(netplayer)}.into()]
 }
 
 #[handler(ctos::HsNotReady)]

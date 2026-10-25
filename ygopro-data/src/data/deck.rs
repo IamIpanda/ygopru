@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fmt::Display;
+use std::iter::Chain;
+use std::slice::Iter;
 use std::str::FromStr;
 
 use binrw::BinRead;
@@ -42,9 +44,17 @@ pub struct Deck {
     pub extra: Vec<u32>,
 }
 
+/// Iterator over every card code in main, extra and side.
+pub type DeckIter<'a> = Chain<Chain<Iter<'a, u32>, Iter<'a, u32>>, Iter<'a, u32>>;
+
 impl Deck {
     /// Create an empty deck.
     pub fn new() -> Self { Self::default() }
+
+    /// Iterate every card code in main, extra and side.
+    pub fn iter(&self) -> DeckIter<'_> {
+        self.main.iter().chain(self.extra.iter()).chain(self.side.iter())
+    }
 
     /// Build a deck from raw card codes, splitting into main and side.
     pub fn load_from_codes(codes: &[u32], mainc: usize, sidec: usize) -> Self {
@@ -59,7 +69,7 @@ impl Deck {
     /// Count each card code across main, extra, and side.
     pub fn get_hash(&self) -> HashMap<u32, usize> {
         let mut counts: HashMap<u32, usize> = HashMap::new();
-        for &code in self.main.iter().chain(self.extra.iter()).chain(self.side.iter()) {
+        for &code in self.iter() {
             *counts.entry(code).or_insert(0) += 1;
         }
         counts 
@@ -74,7 +84,7 @@ impl Deck {
     }
 
     /// Check the deck against the limit list and the rule.
-    pub fn prepare<'a>(&mut self, lflist: &LFList, rule: Rule, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Result<(), DeckError> {
+    pub fn prepare<'a>(&self, lflist: &LFList, rule: Rule, resolve_card: impl Fn(u32) -> Option<&'a Card>) -> Result<(), DeckError> {
         self.check(lflist, rule, 
             |c| resolve_card(c).map(|c| c.ot).unwrap_or(OT::empty()), 
             |c| resolve_card(c).map(|c| c.card_type).unwrap_or(Type::empty()),
@@ -100,10 +110,17 @@ impl Deck {
     pub fn check(&self, lflist: &LFList, rule: Rule, get_rule: impl Fn(u32) -> OT, get_type: impl Fn(u32) -> Type, resolve_code: impl Fn(u32) -> u32) -> Result<(), DeckError> {
         check_deck_length(&self.main, &self.extra, &self.side)?;
         check_illegal_cards(&self.main, &self.side, &self.extra, get_type)?;
-        let iter = self.main.iter().chain(self.extra.iter()).chain(self.side.iter());
+        let iter = self.iter();
         check_rule(iter.clone(), rule, get_rule)?;
         check_deck_lflists(iter, lflist, resolve_code)
     }
+}
+
+impl<'a> IntoIterator for &'a Deck {
+    type Item = &'a u32;
+    type IntoIter = DeckIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter { self.iter() }
 }
 
 impl ToString for Deck {
@@ -291,25 +308,24 @@ pub fn check_rule<'a>(codes: impl Iterator<Item = &'a u32>, rule: Rule, get_rule
 /// Check the card counts against the limit list.
 pub fn check_deck_lflists<'a>(codes: impl Iterator<Item = &'a u32>, lflist: &LFList, resolve_code: impl Fn(u32) -> u32) -> Result<(), DeckError> {
     let mut counts: HashMap<u32, u32> = HashMap::new();
+    let mut credit_used: HashMap<&str, u32> = HashMap::new();
     for &code in codes {
-        let resolved = resolve_code(code);
-        *counts.entry(resolved).or_insert(0) += 1;
-    }
-
-    let mut current = 0;
-    for (&code, &count) in &counts {
-        if count > 3 {
+        let code = resolve_code(code);
+        let count = counts.entry(code).or_insert(0);
+        *count += 1;
+        if *count > 3 {
             return Err(DeckError::new().with_error_type(DeckErrorType::CardCount).with_code(code));
         }
-        if lflist.genesys > 0 && let Some(&limit) = lflist.glist.get(&code) {
-            current += limit * count;
-            if current > lflist.genesys {
+        if let Some(&limit) = lflist.content.get(&code)
+            && *count as u8 > limit {
+                return Err(DeckError::new().with_error_type(DeckErrorType::Lflist).with_code(code));
+        }
+        for (key, &credit_limit) in &lflist.credit_limits {
+            let used = credit_used.entry(key.as_str()).or_insert(0);
+            *used += lflist.credit(code, key);
+            if *used > credit_limit {
                 return Err(DeckError::new().with_error_type(DeckErrorType::Lflist).with_code(code));
             }
-        }
-        if let Some(&limit) = lflist.content.get(&code)
-            && count as u8 > limit {
-                return Err(DeckError::new().with_error_type(DeckErrorType::Lflist).with_code(code));
         }
     }
     Ok(())

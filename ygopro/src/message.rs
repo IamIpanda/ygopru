@@ -75,6 +75,19 @@ pub struct DuelInit;
 #[message(ygopro, flag = 4)]
 pub struct DuelStart;
 
+#[derive(Debug, Message)]
+#[message(ygopro, flag = 5)]
+pub struct ValidateDeck {
+    pub player: crate::duel::PlayerIndex,
+    pub deck: ygopro_data::data::Deck,
+}
+
+#[derive(Debug, Message)]
+#[message(ygopro, flag = 6)]
+pub struct SendDeckValidation {
+    pub player: crate::duel::PlayerIndex,
+}
+
 /// Signal the end of a duel.
 ///
 /// Sent when a duel is ended.
@@ -136,9 +149,9 @@ pub struct Terminate;
 /// or [`ygopro_handler::extract::Response::Terminate`].
 trait Next {
     /// Handle the [`ygopro_handler::extract::Response::Continue`] response.
-    fn process_continue(_duel: &mut Duel) {}
+    fn process_continue(self, _duel: &mut Duel) where Self: Sized {}
     /// Handle the [`ygopro_handler::extract::Response::Terminate`] response.
-    fn process_terminate(duel: &mut Duel) {
+    fn process_terminate(self, duel: &mut Duel) where Self: Sized {
         duel.queue_request_ex(MatchEnd);
     }
 }
@@ -146,14 +159,20 @@ trait Next {
 impl Next for ClientJoin {}
 impl Next for FirstShuffle {}
 impl Next for DuelInit {
-    fn process_continue(duel: &mut Duel) {
+    fn process_continue(self, duel: &mut Duel) {
         duel.queue_request_ex(DuelStart);
     }
 }
 impl Next for DuelStart {}
+impl Next for ValidateDeck {
+    fn process_continue(self, duel: &mut Duel) {
+        duel.queue_request_ex(SendDeckValidation { player: self.player });
+    }
+}
+impl Next for SendDeckValidation {}
 
 impl Next for DuelEnd {
-    fn process_continue(duel: &mut Duel) {
+    fn process_continue(self, duel: &mut Duel) {
         duel.queue_request_ex(GenerateReplay);
         duel.queue_request_ex(JudgeContinueMatch);
     }
@@ -162,7 +181,7 @@ impl Next for DuelEnd {
 impl Next for GenerateReplay {}
 
 impl Next for JudgeContinueMatch {
-    fn process_continue(duel: &mut Duel) {
+    fn process_continue(self, duel: &mut Duel) {
         duel.queue_request_ex(RecreateDuel);
     }
 }
@@ -170,12 +189,12 @@ impl Next for JudgeContinueMatch {
 impl Next for RecreateDuel {}
 impl Next for Timeout {}
 impl Next for MatchEnd {
-    fn process_terminate(duel: &mut Duel) {
+    fn process_terminate(self, duel: &mut Duel) {
         duel.request_sender.send(crate::duel::Request::Command { name: "terminate", arguments: Some(Box::new([0; 8])) }).ok();
     }
 }
 impl Next for Terminate {
-    fn process_terminate(_duel: &mut Duel) {
+    fn process_terminate(self, _duel: &mut Duel) {
         warn!("Send terminate response in terminate processing")
     }
 }
@@ -198,14 +217,14 @@ macro_rules! generate_enum {
             /// Dispatch to the message's `Next` implementation for the [`ygopro_handler::extract::Response::Continue`] response.
             pub fn process_continue(self, duel: &mut Duel) {
                 match self {
-                    $(Message::$message_name(_) => <$message_name as Next>::process_continue(duel)),*
+                    $(Message::$message_name(inner) => <$message_name as Next>::process_continue(inner, duel)),*
                 }
             }
 
             /// Dispatch to the message's `Next` implementation for the [`ygopro_handler::extract::Response::Terminate`] response.
             pub fn process_terminate(self, duel: &mut Duel) {
                 match self {
-                    $(Message::$message_name(_) => <$message_name as Next>::process_terminate(duel)),*
+                    $(Message::$message_name(inner) => <$message_name as Next>::process_terminate(inner, duel)),*
                 }
             }
         }
@@ -279,6 +298,8 @@ generate_enum!(
     FirstShuffle = 2,
     DuelInit = 3,
     DuelStart = 4,
+    ValidateDeck = 5,
+    SendDeckValidation = 6,
     DuelEnd = 10,
     GenerateReplay = 11,
     JudgeContinueMatch = 12,

@@ -1,6 +1,6 @@
 [package]
 name = "ygopro-data"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
@@ -17,6 +17,7 @@ lzma-rs = "0.3"
 num_enum = "0.7"
 thiserror = "1"
 rusqlite = { version = "0.39", features = ["bundled", "serialize"], optional = true }
+slotmap = { version = "1.1", optional = true }
 ygopro-derive.workspace = true
 bytes = "1.11.1"
 modular-bitfield = "0.13.1"
@@ -26,6 +27,7 @@ syn = "1.0"
 darling = "0.14"
 
 [features]
-default = ["card","forge"]
+default = ["card","forge","field"]
 card=["dep:rusqlite"]
 forge=[]
+field=["dep:slotmap"]
