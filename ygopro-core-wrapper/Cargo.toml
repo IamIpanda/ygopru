@@ -14,14 +14,19 @@ ygopro-data.workspace = true
 rand = "0.8"
 parking_lot = "0.12"
 modular-bitfield = "0.13.1"
+mlua = { version = "0.12", default-features = false, features = ["send"] }
+mlua-sys = { version = "0.13", default-features = false, features = ["external"] }
 
 [build-dependencies]
 cc = "1"
 glob = "0.3"
 
 [features]
-default = ["official"]
+default = ["official", "lua54"]
 official = []
 koishi = []
 custom = []
+dual = []
+lua54 = ["mlua/lua54"]
+lua55 = ["mlua/lua55"]
 card = ["ygopro-data/card"]

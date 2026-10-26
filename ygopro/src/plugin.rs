@@ -31,6 +31,7 @@ pub mod no_init_shuffle_deck;
 pub mod preload_script;
 pub mod replay;
 pub mod reconnect;
+pub mod registry;
 pub mod soumatou;
 pub mod terminate;
 pub mod time_backed;

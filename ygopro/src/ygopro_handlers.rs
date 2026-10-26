@@ -707,6 +707,7 @@ fn on_recreate_duel(duel: &mut Duel) {
     duel.stage = DuelStage::Siding;
     duel.sender.send(stoc::ChangeSide.into(), SendTarget::AllPlayer);
     duel.sender.send(stoc::WaitingSide.into(), SendTarget::AllObserver);
-    duel.core = ygopro_core_wrapper::Duel::new(duel.configuration.seed(duel.duel_count));
+    let seed = duel.configuration.seed(duel.duel_count);
+    duel.core = new_core_duel(&duel.configuration, seed);
     duel.client_responses.clear();
 }
