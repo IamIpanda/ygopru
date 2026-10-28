@@ -38,10 +38,11 @@ linkme = "0.3"
 walkdir = "2.5.0"
 glob = "0.3"
 slab = "0.4"
+mlua = { version = "0.12", default-features = false, features = ["send"] }
 zip = { version = "4", optional = true }
 
 ygopro-data.workspace = true
-ygopro-core-wrapper.workspace = true
+ygopro-core-wrapper = { workspace = true, features = ["lua54"] }
 ygopro-handler.workspace = true
 ygopro-derive.workspace = true
 
@@ -57,6 +58,7 @@ card = [
     "ygopro-data/card",
 ]
 koishi = ["ygopro-core-wrapper/koishi"]
+dual = ["ygopro-core-wrapper/dual"]
 forge = ["ygopro-data/forge"]
 
 [package.metadata]

@@ -73,7 +73,7 @@ pub fn counterfeit_duel(replay: Replay) -> (UnboundedSender<Request>, Vec<Unboun
     configuration.no_mask = true;
     let mut duel = Duel::new(replay.host_info(), configuration);
     duel.configuration.enable_plugin(crate::plugin::soumatou::NAME);
-    duel.core = core::Duel::new(core::DuelSeed::Complicated(replay.header.seed_sequence));
+    duel.core = new_core_duel(&duel.configuration, core::DuelSeed::Complicated(replay.header.seed_sequence));
     duel.max_player_count = if replay.header.is_tag() { 4 } else { 2 };
     let mut receivers = vec![];
     receivers.push(counterfeit_player(replay.body.host_name, replay.body.host_deck.into(), &mut duel));

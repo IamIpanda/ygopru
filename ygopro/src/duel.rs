@@ -63,6 +63,16 @@ pub(crate) fn log_plugin_statistics(
     }
 }
 
+#[cfg(feature = "dual")]
+pub(crate) fn new_core_duel(configuration: &Configuration, seed: core::DuelSeed) -> core::Duel {
+    core::Duel::new(seed, configuration.configurations.get::<core::CoreKind>().copied().unwrap_or_default())
+}
+
+#[cfg(not(feature = "dual"))]
+pub(crate) fn new_core_duel(_: &Configuration, seed: core::DuelSeed) -> core::Duel {
+    core::Duel::new(seed)
+}
+
 /// The target a [`stoc::Message`] would send to.
 #[derive(Clone, Copy, Default)]
 pub enum SendTarget {
@@ -477,12 +487,13 @@ impl Duel {
     /// Create a duel, defined by a [`HostInfo`] and [`struct@Configuration`].
     pub fn new(host_info: HostInfo, mut configuration: Configuration) -> Self {
         let seed = configuration.seed(0);
+        let duel_core = new_core_duel(&configuration, seed);
         let (request_sender, request_receiver) = mpsc::unbounded_channel();
         Self {
             host_player: Netplayer::Unknown,
             host_info,
             stage: DuelStage::Begin,
-            core: core::Duel::new(seed),
+            core: duel_core,
             name: FixedLengthString::allocate(),
             pass: FixedLengthString::allocate(),
             sender: Sender::new(),

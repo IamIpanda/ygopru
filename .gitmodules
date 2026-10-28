@@ -1,12 +1,12 @@
-[submodule "ygopro-core-wrapper/official/ocgcore"]
-	path = ygopro-core-wrapper/official/ocgcore
+[submodule "ygopro-core-wrapper/core/official"]
+	path = ygopro-core-wrapper/core/official
 	url = https://github.com/mycard/ygopro-core
-[submodule "ygopro-core-wrapper/official/lua"]
-	path = ygopro-core-wrapper/official/lua
+[submodule "ygopro-core-wrapper/lua/5.5.1"]
+	path = ygopro-core-wrapper/lua/5.5.1
 	url = https://github.com/lua/lua
-[submodule "ygopro-core-wrapper/koishi/ocgcore"]
-	path = ygopro-core-wrapper/koishi/ocgcore
+[submodule "ygopro-core-wrapper/core/koishi"]
+	path = ygopro-core-wrapper/core/koishi
 	url = https://github.com/purerosefallen/ygopro-core
-[submodule "ygopro-core-wrapper/koishi/lua"]
-	path = ygopro-core-wrapper/koishi/lua
+[submodule "ygopro-core-wrapper/lua/5.4.8"]
+	path = ygopro-core-wrapper/lua/5.4.8
 	url = https://github.com/lua/lua
