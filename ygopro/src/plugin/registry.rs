@@ -1,4 +1,4 @@
-//! A string registry visible to lua scripts, shared by the duels of a match.
+//! Sharing values between duels inner match
 //!
 //! The values outlive a single duel: what one duel writes, the next duel of the same match reads
 //! back, while another match sees nothing. Scripts reach it through the `Duel` table:
@@ -11,16 +11,29 @@
 //!   `override` is true.
 //! - `Duel.ClearRegistry()` removes everything.
 //!
-//! Keys and values go through `tostring`.
+//! Keys and values go through `tostring`, so every stored value is a string. This plugin mimics
+//! the registry functions built into the koishi core, but as a plugin, so it can be plugged in and
+//! out freely. The string-only restriction is what keeps `ygopro` free of `serde`: carrying real
+//! lua values across two lua states requires serialization, and were `serde` allowed, the koishi
+//! behaviour could be reproduced exactly.
 //!
+//! The plugin exists mainly to demonstrate what [`lua`](ygopro_core_wrapper::Duel::lua) is for.
+//! Note that it overrides the same-named functions of the koishi core; enabling or disabling it is
+//! the caller's responsibility.
+//!
+//! # Examples
+//!
+//! Enable the module:
+//! 
 //! ```
 //! let mut configuration = ygopro::Configuration::default();
 //! configuration.enable_plugin("ygopro::plugin::registry");
 //! ```
 //!
-//! An effect that may be activated only once per match:
+//! Then an effect that may be activated only once per match:
 //!
 //! ```lua
+//! local s,id,o=GetID()
 //! function s.cost(e,tp,eg,ep,ev,re,r,rp,chk)
 //! 	if chk==0 then return Duel.GetRegistryValue(id)==nil end
 //! 	Duel.SetRegistryValue(id,"1")
@@ -28,8 +41,6 @@
 //! ```
 
 use std::collections::HashMap;
-
-use linkme::distributed_slice;
 
 use ygopro_derive::Attachment;
 use ygopro_derive::before;

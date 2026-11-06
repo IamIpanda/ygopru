@@ -1,6 +1,6 @@
 [package]
 name = "ygopro-core-wrapper"
-version = "0.1.5"
+version = "0.2.0"
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
@@ -26,7 +26,5 @@ default = ["official", "lua54"]
 official = []
 koishi = []
 custom = []
-dual = []
 lua54 = ["mlua/lua54"]
 lua55 = ["mlua/lua55"]
-card = ["ygopro-data/card"]

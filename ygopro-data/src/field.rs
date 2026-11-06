@@ -1334,7 +1334,7 @@ mod tests {
 
     fn start(deck: u16, extra: u16) -> gm::Message {
         gm::Message::Start(gm::Start {
-            player_type: 0,
+            player_type: gm::PlayerType::new(),
             rule: MasterRule::MasterRule2020,
             player1_lp: 8000,
             player2_lp: 8000,

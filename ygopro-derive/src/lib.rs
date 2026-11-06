@@ -5,6 +5,7 @@ use syn::parse_macro_input;
 use syn::AttributeArgs;
 use syn::ItemFn;
 
+mod api;
 mod attachment;
 mod command;
 mod configuration;
@@ -550,5 +551,90 @@ pub fn register_to(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let function = parse_macro_input!(item as ItemFn);
     registry::register_to_impl(info, function).into()
+}
+
+/// Mounts an `axum` router factory into a downstream HTTP server's
+/// link-time registry.
+///
+/// This macro exists for the HTTP servers built on top of `ygopro`, not for
+/// `ygopro` itself: the ygopro side has no HTTP server today, so nothing in
+/// this workspace registers a router and the macro is never expanded there.
+/// It is here so a server crate (e.g. `srvpro-api`) can keep every route
+/// next to the plugin it belongs to and still collect them all without a
+/// central list.
+///
+/// The function must take no arguments and return `::axum::Router`. Only the
+/// function is registered as a `fn` pointer, so the router is rebuilt on
+/// demand each time the host merges it.
+///
+/// # Syntax
+///
+/// - `<plugin>` — optional leading path of the plugin the routes belong to;
+///   the routes are mounted only when that plugin is enabled.
+/// - `name = "<str>"` — the plugin's name as a string literal, overriding
+///   `<plugin>`.
+/// - `global` — mount unconditionally, no matter which plugins are enabled;
+///   it takes no plugin name, since that would be a contradiction.
+///
+/// The plugin defaults to `module_path!()` when neither `<plugin>` nor
+/// `name` is given.
+///
+/// # Generated code
+///
+/// A plugin-scoped router registers into the `(&'static str, fn())` slice:
+///
+/// ```text
+/// #[::linkme::distributed_slice(crate::SRVPRO_API_ROUTERS)]
+/// static BUILD_BAD_WORDS_ROUTER: (&'static str, fn() -> ::axum::Router) =
+///     (srvpro::plugin::bad_words::NAME, build_bad_words_router);
+/// ```
+///
+/// A global router registers into the bare-`fn` slice, and its static name
+/// is the function name uppercased:
+///
+/// ```text
+/// #[::linkme::distributed_slice(crate::SRVPRO_API_GLOBAL_ROUTERS)]
+/// static BUILD_STOP_ROUTER: fn() -> ::axum::Router = build_stop_router;
+/// ```
+///
+/// # Scope
+///
+/// The macro only registers; it does not serve HTTP, decide the port, or
+/// filter by enabled plugins. Both slices are resolved as
+/// `crate::SRVPRO_API_ROUTERS` and `crate::SRVPRO_API_GLOBAL_ROUTERS`, so
+/// the crate using the macro must declare them, and the `axum` dependency
+/// must be reachable as `::axum`.
+///
+/// # Examples
+///
+/// Routes tied to a plugin, mounted only when that plugin is enabled
+/// (`srvpro-api/src/plugin/bad_words.rs`):
+///
+/// ```text
+/// #[api(srvpro::plugin::bad_words::NAME)]
+/// fn build_bad_words_router() -> Router {
+///     auth::required(PERMISSION, Router::new().route("/api/bad_words", post(change_bad_words)))
+/// }
+/// ```
+///
+/// Unconditional routes such as the stop endpoint
+/// (`srvpro-api/src/plugin/stop.rs`):
+///
+/// ```text
+/// #[api(global)]
+/// fn build_stop_router() -> Router {
+///     auth::required(PERMISSION, Router::new()
+///         .route("/api/stop", get(stop))
+///         .route("/api/getstop", get(get_stop)))
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn api(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr = parse_macro_input!(attr as AttributeArgs);
+    let function = parse_macro_input!(item as ItemFn);
+    match api::api_impl(&attr, function) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
 }
 

@@ -4,8 +4,12 @@
 //! message [`Error`] type.
 
 use std::fmt::Debug;
+use std::io::Read;
+use std::io::Seek;
+
 use binrw::BinRead;
 use binrw::BinWrite;
+use binrw::Endian;
 
 use crate::constants::MasterRule;
 use crate::constants::Rule;
@@ -14,6 +18,13 @@ pub trait PureMessage: 'static {}
 
 pub trait Message: PureMessage + Debug {
     fn message_type() -> crate::message::all::MessageType where Self: Sized;
+}
+
+pub fn read_unknown<Reader>(reader: &mut Reader, endian: Endian, _: ()) -> binrw::BinResult<Vec<u8>> where Reader: Read + Seek {
+    let start = reader.stream_position()?;
+    let data: Vec<u8> = binrw::helpers::until_eof(reader, endian, ())?;
+    if data.is_empty() { return Err(binrw::Error::NoVariantMatch { pos: start }) }
+    Ok(data)
 }
 
 #[derive(BinRead, BinWrite, Clone, Debug)]
@@ -120,7 +131,7 @@ mod forge {
     /// and the duel start a client needs before the recorded messages.
     pub fn forge_to_stoc(messages: &[gm::Message]) -> Vec<stoc::Message> {
         let mut stoc_messages = Vec::new();
-        let name = messages.iter().find_map(|message| match message { gm::Message::SibylName(name) => Some(name), _ => None });
+        let name = messages.iter().find_map(|message| match message { gm::Message::SibylName(name) => Some(&**name), _ => None });
         for message in messages {
             match message {
                 gm::Message::SibylName(name) => {
@@ -136,7 +147,7 @@ mod forge {
                     stoc_messages.push(stoc::Message::from(stoc::DuelStart));
                 },
                 gm::Message::SibylChat(chat) => stoc_messages.push(stoc::Chat::from((chat, name)).into()),
-                gm::Message::SibylReplay(sibyl) => stoc_messages.push(stoc::Message::Replay(stoc::Replay { replay: sibyl.replay.clone() })),
+                gm::Message::SibylReplay(sibyl) => stoc_messages.push(stoc::Replay { replay: sibyl.replay.clone() }.into()),
                 message => stoc_messages.push(stoc::Message::from(message.clone()))
             }
         }
@@ -177,7 +188,7 @@ pub enum Error {
 
 #[macro_export]
 macro_rules! generate_enum {
-    ($($message_name:ident=$message_flag:literal),*) => {
+    (@parse [$($message_name:ident = $message_flag:literal : $variant:ty,)*] [$($boxed:ident,)*]) => {
         #[derive(binrw::BinRead, binrw::BinWrite, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
         #[brw(repr=u8)]
         #[repr(u8)]
@@ -213,10 +224,12 @@ macro_rules! generate_enum {
             }
         }
 
+        #[repr(u8)]
         #[derive(binrw::BinRead, binrw::BinWrite, Clone, Debug)]
         pub enum Message {
             $(#[brw(magic($message_flag))]
-            $message_name($message_name)),*
+            $message_name($variant) = $message_flag,)*
+            Unknown(#[br(parse_with = $crate::message::utils::read_unknown)] Vec<u8>),
         }
 
         impl crate::message::PureMessage for Message {}
@@ -224,10 +237,21 @@ macro_rules! generate_enum {
         impl From<&Message> for MessageType {
             fn from(value: &Message) -> Self {
                 match value {
-                    $(Message::$message_name(_) => MessageType::$message_name),*
+                    $(Message::$message_name(_) => MessageType::$message_name,)*
+                    Message::Unknown(data) => MessageType::Unknown(data.first().copied().unwrap_or(0)),
                 }
             }
         }
+
+        $(
+            impl From<Box<$boxed>> for $boxed {
+                fn from(value: Box<$boxed>) -> Self { *value }
+            }
+
+            impl<'a> From<&'a Box<$boxed>> for &'a $boxed {
+                fn from(value: &'a Box<$boxed>) -> Self { &**value }
+            }
+        )*
 
         $(
             impl TryFrom<Message> for $message_name {
@@ -235,7 +259,7 @@ macro_rules! generate_enum {
 
                 fn try_from(value: Message) -> Result<Self, Self::Error> {
                     match value {
-                        Message::$message_name(v) => Ok(v),
+                        Message::$message_name(v) => Ok(std::convert::Into::into(v)),
                         _ => Err(crate::message::Error::WrongType)
                     }
                 }
@@ -246,7 +270,7 @@ macro_rules! generate_enum {
 
                 fn try_from(value: &'m Message) -> Result<Self, Self::Error> {
                     match value {
-                        Message::$message_name(v) => Ok(v),
+                        Message::$message_name(v) => Ok(std::convert::Into::into(v)),
                         _ => Err(crate::message::Error::WrongType)
                     }
                 }
@@ -254,7 +278,7 @@ macro_rules! generate_enum {
             
             impl From<$message_name> for Message {
                 fn from(value: $message_name) -> Self {
-                    Message::$message_name(value)
+                    Message::$message_name(std::convert::Into::into(value))
                 }
             }
 
@@ -264,6 +288,24 @@ macro_rules! generate_enum {
                 } 
             }
         )*
+    };
+
+    (@parse [$($acc:tt)*] [$($boxed:tt)*] [$mark:ident] $message_name:ident = $message_flag:literal, $($rest:tt)*) => {
+        $crate::generate_enum!(@parse
+            [$($acc)* $message_name = $message_flag : Box<$message_name>,]
+            [$($boxed)* $message_name,]
+            $($rest)*);
+    };
+
+    (@parse [$($acc:tt)*] [$($boxed:tt)*] $message_name:ident = $message_flag:literal, $($rest:tt)*) => {
+        $crate::generate_enum!(@parse
+            [$($acc)* $message_name = $message_flag : $message_name,]
+            [$($boxed)*]
+            $($rest)*);
+    };
+
+    ($($input:tt)*) => {
+        $crate::generate_enum!(@parse [] [] $($input)*);
     };
 }
 

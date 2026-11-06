@@ -2,7 +2,7 @@
     <h1>ygopru</h1>
     <p>
         <img alt="Rust" src="https://img.shields.io/badge/rustc-1.96.0-blue?logo=rust&logoColor=white">
-        <img alt="Lua" src="https://img.shields.io/badge/lua-5.5.1-purple?logo=lua&logoColor=white">
+        <img alt="Lua" src="https://img.shields.io/badge/lua-5.4.8-purple?logo=lua&logoColor=white">
     </p>
     <p><a href="README.md">English</a> · <a href="README.zh.md">中文</a></p>
 </div>
@@ -123,7 +123,7 @@ let mut duel_host = DuelHost::new(HostInfo::default(), configuration);
 ygopro::cli::start_local_server(7911, duel_host).await;
 ```
 
-If you need a multiple-game (always-on) server, check the `srvpru` project instead. (It's a work in progress.)
+If you need a multiple-game (always-on) server, check the [srvpru](https://github.com/iamIpanda/srvpru) project instead. 
 
 You can also replace the `ygopro` binary file under `srvpro`.
 

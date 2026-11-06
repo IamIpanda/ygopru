@@ -1,14 +1,12 @@
 
-//! FFI bindings for [`ygopro-core`](https://github.com/Fluorohydride/ygopro-core).
-//! 
-//! This project use `ygopro-core` and `lua` as its submodule, and use `cxx` to compile them.
-//!
-//! In this doc, `ygopro-core` will be short as `ygocore`.
-
+#![doc = include_str!("../README.md")]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
 #![warn(missing_docs)]
+
+pub mod constants;
+pub mod random;
 
 use modular_bitfield::Specifier;
 use modular_bitfield::bitfield;
@@ -26,49 +24,57 @@ use ygopro_data::constants::Query;
 use ygopro_data::data::CoreCard;
 use ygopro_data::data::DuelOptions;
 
-/// The C-style integer used to hold a duel pointer.
-pub type intptr_t = isize;
+use crate::random::SEED_COUNT;
 
-pub mod constants;
-pub mod random;
 pub use constants::*;
 pub use random::DuelSeed;
 
-use crate::random::SEED_COUNT;
+mod ygocore;
+#[cfg(all(not(mix_core), feature = "official"))] mod official;
+#[cfg(all(not(mix_core), feature = "official"))] pub use official::*;
+#[cfg(all(not(mix_core), feature = "koishi"))] mod koishi;
+#[cfg(all(not(mix_core), feature = "koishi"))] pub use koishi::*;
+#[cfg(all(not(mix_core), feature = "custom", not(custom_wrapper)))] mod custom;
+#[cfg(all(not(mix_core), feature = "custom", custom_wrapper))] mod custom { include!(env!("YGOCORE_CUSTOM_WRAPPER")); }
+#[cfg(all(not(mix_core), feature = "custom"))] pub use custom::*;
+
+#[cfg(all(mix_core, feature = "official"))] pub mod official;
+#[cfg(all(mix_core, feature = "koishi"))]   pub mod koishi;
+#[cfg(all(mix_core, feature = "custom", not(custom_wrapper)))] pub mod custom;
+#[cfg(all(mix_core, feature = "custom", custom_wrapper))] pub mod custom { include!(env!("YGOCORE_CUSTOM_WRAPPER")); }
+
+/// The ygocore implementation a dual build can pick from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CoreKind {
+    /// The official core.
+    #[cfg(feature = "official")]
+    Official,
+    /// The koishi core.
+    #[cfg(feature = "koishi")]
+    Koishi,
+    /// The custom core.
+    #[cfg(feature = "custom")]
+    Custom
+}
+
+impl Default for CoreKind {
+    #[allow(unreachable_code, clippy::needless_return)]
+    fn default() -> Self {
+        #[cfg(feature = "official")] return Self::Official;
+        #[cfg(feature = "koishi")]   return Self::Koishi;
+        #[cfg(feature = "custom")]   return Self::Custom;
+    }
+}
+
+/// The C-style integer used to hold a duel pointer.
+pub type intptr_t = isize;
+
 /// Callback to fetch a script by its name.
 pub type script_reader = Option<extern "C" fn(*const c_char, *mut c_int) -> *mut u8>;
 /// Callback to fetch a card's data by its code.
 pub type card_reader = Option<extern "C" fn(u32, *mut CoreCard) -> u32>;
 /// Callback invoked when the core emits a message.
 pub type message_handler = Option<extern "C" fn(intptr_t, u32) -> u32>;
-
-#[cfg(not(feature = "dual"))]
-mod official;
-#[cfg(not(feature = "dual"))]
-mod koishi;
-
-#[cfg(feature = "dual")]
-pub mod official;
-#[cfg(feature = "dual")]
-pub mod koishi;
-
-mod ygocore;
-
-#[cfg(all(not(feature = "dual"), feature = "koishi"))]
-pub use koishi::*;
-#[cfg(all(not(feature = "dual"), not(feature = "koishi")))]
-pub use official::*;
-
-/// The ygocore implementation a dual build can pick from.
-#[cfg(feature = "dual")]
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub enum CoreKind {
-    /// The official core.
-    #[default]
-    Official,
-    /// The koishi core.
-    Koishi
-}
 
 /// A ygocore duel wrapper, which handles the raw FFI bindings.
 pub struct Duel {
@@ -104,17 +110,18 @@ impl Duel {
     /// Create a duel by [`DuelSeed`].
     /// 
     /// This is a wrapper of [`create_duel`] and [`create_duel_v2`].
-    #[cfg(not(feature = "dual"))]
+    #[cfg(not(mix_core))]
     pub fn new(seed: DuelSeed) -> Self {
         Self::new_with_api(seed, api())
     }
 
     /// Create a duel by [`DuelSeed`] on the given [`CoreKind`].
-    #[cfg(feature = "dual")]
+    #[cfg(mix_core)]
     pub fn new(seed: DuelSeed, kind: CoreKind) -> Self {
         let api = match kind {
-            CoreKind::Official => official::api(),
-            CoreKind::Koishi => koishi::api(),
+            #[cfg(feature = "official")] CoreKind::Official => official::api(),
+            #[cfg(feature = "koishi")]   CoreKind::Koishi   => koishi::api(),
+            #[cfg(feature = "custom")]   CoreKind::Custom   => custom::api(),
         };
         Self::new_with_api(seed, api)
     }
@@ -320,14 +327,14 @@ pub struct ProcessResult {
 mod tests {
     use super::Duel;
     use super::DuelSeed;
-    #[cfg(feature = "dual")]
+    #[cfg(mix_core)]
     use super::CoreKind;
 
     #[test]
     fn lua_is_available_until_end() {
-        #[cfg(feature = "dual")]
+        #[cfg(mix_core)]
         let mut duel = Duel::new(DuelSeed::Single(42), CoreKind::Official);
-        #[cfg(not(feature = "dual"))]
+        #[cfg(not(mix_core))]
         let mut duel = Duel::new(DuelSeed::Single(42));
         let lp = {
             let lua = unsafe { duel.lua() }.unwrap();

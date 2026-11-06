@@ -4,14 +4,26 @@
 //! 
 //! # Notes
 //!
-//! These messages are skipped when replaying the history to an observer:
-//! 
-//! - `JoinGame`: the observer will receives its own join response.
-//! - `SelectHand` / `SelectTp`: directed at a specific duelist to pick a hand or turn.
-//! - `TimeLimit`: directed at a duelist's turn timer.
-//! - `ChangeSide`: only relevant during siding, which is not replayed.
-//! - `HandResult`: the hand result is delivered to the duelists, not observers.
+//! `masked_messages` is a field of the duel and must not be changed. It already carries enough
+//! information to rebuild the duel state, so no reconstruction is needed. What has to be filtered
+//! out are the messages an observer never receives:
+//!
+//! - `SelectHand` / `SelectTp` / `HandResult`: a duelist picks a hand or a turn.
+//! - `ChangeSide`: switching the side deck, which is not replayed.
+//! - `DeckCount`: sent to each duelist separately with the self/opponent counts swapped, while the
+//!   observer copy of `gm::Start` already carries both deck counts.
+//! - `JoinGame`: the observer receives its own join response.
+//! - `TypeChange`: the copy in `masked_messages` has lost its parsed message, so the observer index
+//!   degrades to `Observer(255)` when it is read back, and replaying it would overwrite the
+//!   position that the provider bridge learned from the stoc stream (see `crate::host`).
+//! - `LeaveGame`: only sent to the client being removed.
+//! - `TimeLimit`: directed at the duelist whose turn timer is running.
 //! - `TeammateSurrender`: specific to a tag-duel team player.
+//!
+//! Also skipped:
+//!
+//! - every `gm::Start` that is not the observer copy: the duel sends one copy per duelist plus one
+//!   for all observers, and the client rebuilds the field on every copy it receives.
 //! - any `waiting_for` game message: an observer must not be prompted to choose.
 //!
 //! # Examples
@@ -30,9 +42,8 @@ use log::warn;
 
 use ygopro_data::constants::DuelStage;
 use ygopro_data::constants::Netplayer;
-use ygopro_data::message::ctos;
+use ygopro_data::message::{ctos, stoc, gm};
 use ygopro_data::message::gm::GameMessage;
-use ygopro_data::message::stoc;
 
 use ygopro_derive::after;
 use ygopro_derive::command;
@@ -48,6 +59,7 @@ use crate::ygopro_handlers::YGOPRO_HANDLERS;
 use crate::ygopro_handlers::YGOPRO_HANDLERS_EX;
 
 /// Name for activitating this module in the plugin system.
+#[linkme::distributed_slice(crate::plugin::DEFAULT_ENABLED_PLUGINS)]
 pub static NAME: &'static str = module_path!();
 
 #[command]
@@ -58,18 +70,26 @@ fn soumatou(duel: &mut Duel, arguments: &mut Box<dyn Any + Send>) {
     };
     let duel_start_key = stoc::DuelStart.message_key();
     let directed_keys = [
-        stoc::MessageType::JoinGame.message_key(),
-        stoc::MessageType::SelectTp.message_key(),
         stoc::MessageType::SelectHand.message_key(),
-        stoc::MessageType::TimeLimit.message_key(),
-        stoc::MessageType::ChangeSide.message_key(),
+        stoc::MessageType::SelectTp.message_key(),
         stoc::MessageType::HandResult.message_key(),
+        stoc::MessageType::ChangeSide.message_key(),
+        stoc::MessageType::DeckCount.message_key(),
+        stoc::MessageType::JoinGame.message_key(),
+        stoc::MessageType::TypeChange.message_key(),
+        stoc::MessageType::LeaveGame.message_key(),
+        stoc::MessageType::TimeLimit.message_key(),
         stoc::MessageType::TeammateSurrender.message_key(),
     ];
     for message in duel.sender.masked_messages.iter().skip_while(|message| message.message_key() != duel_start_key) {
         if directed_keys.contains(&message.message_key()) { continue; }
-        if let stoc::Message::GameMessage(game_message) = message.deref() && game_message.message.waiting_for().is_some() {
-            continue;
+        if let stoc::Message::GameMessage(game_message) = message.deref() {
+            if game_message.message.waiting_for().is_some() {
+                continue;
+            }
+            if let gm::Message::Start(start) = &game_message.message && !start.player_type.is_observer() {
+                continue;
+            }
         }
         duel.sender.send_without_record(message.clone(), target.into());
     }

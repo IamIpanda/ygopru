@@ -95,8 +95,8 @@ impl SingleDuel {
             while let Some(request) = stream.next().await {
                 match request {
                     Request::Message(request) => {
-                        if !duel.get_net(request.extra).map_or(true, |p| p.state.allowed(&request.message)) {
-                            warn!("Message type mismatch for player: {:?}, get {:?}", request.extra, ctos::MessageType::from(&request.message));
+                        if let Some(player) = duel.get_net(request.extra) && !player.state.allowed(&request.message) {
+                            warn!("Message type mismatch for player: {:?}, get {:?}, expected {}", request.extra, ctos::MessageType::from(&request.message), player.state);
                             continue;
                         }
                         let (returned_duel, request, returned_states, response) = duel.run_processor(&ygopro_processor, request, states).await;
@@ -454,7 +454,7 @@ pub mod ygopro_handlers {
         let extra1 = duel.query_field_count(CorePlayer::FirstAttackPlayer, Location::Extra) as u16;
         let deck2 = duel.query_field_count(CorePlayer::SecondAttackPlayer, Location::Deck) as u16;
         let extra2 = duel.query_field_count(CorePlayer::SecondAttackPlayer, Location::Extra) as u16;
-        let start = |player_type: u8| gm::Message::Start(gm::Start {
+        let start = |player_type: gm::PlayerType| gm::Message::Start(gm::Start {
             player_type,
             rule: duel_rule,
             player1_lp: start_lp,
@@ -466,13 +466,14 @@ pub mod ygopro_handlers {
         });
         let first_attack_netplayer = transformer.to_net_player(CorePlayer::FirstAttackPlayer);
         let second_attack_netplayer = transformer.to_net_player(CorePlayer::SecondAttackPlayer);
-        duel.sender.send(start(0).into(), SendTarget::Single(first_attack_netplayer));
-        duel.sender.send(start(1).into(), SendTarget::Single(second_attack_netplayer));
-        let observer_player_type = match duel.first_attack_player {
-            Some(PlayerIndex::Player1) => 0x10,
-            Some(PlayerIndex::Player2) => 0x11,
+        duel.sender.send(start(gm::PlayerType::new().with_player(CorePlayer::FirstAttackPlayer)).into(), SendTarget::Single(first_attack_netplayer));
+        duel.sender.send(start(gm::PlayerType::new().with_player(CorePlayer::SecondAttackPlayer)).into(), SendTarget::Single(second_attack_netplayer));
+        let observer_player = match duel.first_attack_player {
+            Some(PlayerIndex::Player1) => CorePlayer::FirstAttackPlayer,
+            Some(PlayerIndex::Player2) => CorePlayer::SecondAttackPlayer,
             _ => unreachable!(),
         };
+        let observer_player_type = gm::PlayerType::new().with_player(observer_player).with_is_observer(true);
         duel.sender.send(start(observer_player_type).into(), SendTarget::AllObserver);
         duel.refresh(CorePlayer::All, Location::Extra, -1, Query::empty(), transformer);
     }

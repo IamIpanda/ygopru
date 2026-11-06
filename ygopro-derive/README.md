@@ -13,6 +13,7 @@ The macros are grouped by what they do:
 | plugin state | `Attachment`, `Configuration` | per-duel shared state and environment-driven plugin configuration |
 | handling | `handler`, `before`, `after`, `command` | turn functions into message/command handlers |
 | registration | `register_to` | put handlers into [`linkme`](https://docs.rs/linkme) distributed slices at link time |
+| http server | `api` | mount `axum` routers into a server's registry; for downstream servers only. |
 
 # Notes
 

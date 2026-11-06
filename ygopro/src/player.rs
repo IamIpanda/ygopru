@@ -36,6 +36,16 @@ impl AllowMessage {
     }
 }
 
+impl std::fmt::Display for AllowMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AllowMessage::None => write!(f, "None"),
+            AllowMessage::Any => write!(f, "Any"),
+            AllowMessage::Some(t) => write!(f, "{:?}", t)
+        }
+    }
+}
+
 impl From<AllowMessage> for u8 {
     fn from(value: AllowMessage) -> Self {
         match value {

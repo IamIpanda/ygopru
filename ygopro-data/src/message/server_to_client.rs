@@ -172,13 +172,10 @@ pub struct DuelStart;
 #[repr(C)]
 pub struct DuelEnd;
 
-// Rust enum use its variant's max size as its size.
-// As we decide to use clone for message dispatching,
-// The replay size is too large to be put in the enum, so we box it.
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
-#[message(stoc, flag = 23)]
+#[message(stoc, flag = 23, boxed)]
 pub struct Replay {
-    pub replay: Box<crate::data::Replay>
+    pub replay: crate::data::Replay
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
@@ -295,13 +292,13 @@ mod test {
     #[test]
     fn print_sizes() {
         macro_rules! print_size {
-            ($($msg:ident = $flag:literal),* $(,)?) => {
+            ($($( [$boxed:ident] )? $msg:ident = $flag:literal,)*) => {
                 println!("=== STOC ===");
                 $(
-                    println!("  {:30}: {:>4} bytes", stringify!($msg), std::mem::size_of::<super::$msg>());
+                    println!("  {:6} {:30}: {:>4} bytes", stringify!($($boxed)?), stringify!($msg), std::mem::size_of::<super::$msg>());
                 )*
-                println!("  {:30}: {:>4} bytes", "MessageType", std::mem::size_of::<super::MessageType>());
-                println!("  {:30}: {:>4} bytes", "Message", std::mem::size_of::<super::Message>());
+                println!("  {:6} {:30}: {:>4} bytes", "", "MessageType", std::mem::size_of::<super::MessageType>());
+                println!("  {:6} {:30}: {:>4} bytes", "", "Message", std::mem::size_of::<super::Message>());
             };
         }
         every_server_to_client_flat_message!(print_size);

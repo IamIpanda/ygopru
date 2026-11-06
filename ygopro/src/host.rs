@@ -56,7 +56,7 @@ impl DuelHost {
             let _ = handle.await;
             finished_sender.send(true).ok();
         });
-        request_sender.send(Request::Message(crate::ygopro_handlers::Request { message: ctos::Message::CreateGame(ctos::CreateGame { host_info, name: FixedLengthString::allocate(), pass: FixedLengthString::allocate() }), extra: Netplayer::Unknown })).ok();
+        request_sender.send(Request::Message(crate::ygopro_handlers::Request { message: ctos::CreateGame { host_info, name: FixedLengthString::allocate(), pass: FixedLengthString::allocate() }.into(), extra: Netplayer::Unknown })).ok();
         Self { ctos_sender: request_sender, finished_sender: finished_sender_for_host }
     }
 

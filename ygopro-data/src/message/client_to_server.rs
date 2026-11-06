@@ -60,7 +60,7 @@ pub struct PlayerInfo {
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone, Message)]
-#[message(ctos, flag = 17)]
+#[message(ctos, flag = 17, boxed)]
 #[repr(C)]
 pub struct CreateGame {
     pub host_info: HostInfo,
@@ -164,13 +164,13 @@ mod test {
     #[test]
     fn print_sizes() {
         macro_rules! print_size {
-            ($($msg:ident = $flag:literal),* $(,)?) => {
+            ($($( [$boxed:ident] )? $msg:ident = $flag:literal,)*) => {
                 println!("=== CTOS ===");
                 $(
-                    println!("  {:30}: {:>4} bytes", stringify!($msg), std::mem::size_of::<super::$msg>());
+                    println!("  {:6} {:30}: {:>4} bytes", stringify!($($boxed)?), stringify!($msg), std::mem::size_of::<super::$msg>());
                 )*
-                println!("  {:30}: {:>4} bytes", "MessageType", std::mem::size_of::<super::MessageType>());
-                println!("  {:30}: {:>4} bytes", "Message", std::mem::size_of::<super::Message>());
+                println!("  {:6} {:30}: {:>4} bytes", "", "MessageType", std::mem::size_of::<super::MessageType>());
+                println!("  {:6} {:30}: {:>4} bytes", "", "Message", std::mem::size_of::<super::Message>());
             };
         }
         every_client_to_server_flat_message!(print_size);

@@ -10,10 +10,13 @@ const LUA_54_DIRECTORY: &str = "5.4.8";
 const LUA_55_DIRECTORY: &str = "5.5.1";
 const LUA_LIBRARY: &str = "ygopro-core-lua";
 const SUPPORT_LIBRARY: &str = "ygopro-core-support";
-const KOISHI_PREFIX: &str = "koishi_";
 
 fn lua_directory() -> &'static str {
     if env::var_os("CARGO_FEATURE_LUA55").is_some() { LUA_55_DIRECTORY } else { LUA_54_DIRECTORY }
+}
+
+fn dir_or(variable: &str, default: PathBuf) -> PathBuf {
+    env::var_os(variable).map(PathBuf::from).unwrap_or(default)
 }
 
 enum Core {
@@ -25,8 +28,8 @@ enum Core {
 impl Core {
     fn source_dir(&self, root: &Path) -> PathBuf {
         match self {
-            Core::Official => root.join("core").join("official"),
-            Core::Koishi => root.join("core").join("koishi"),
+            Core::Official => dir_or("YGOCORE_OFFICIAL_DIR", root.join("core").join("official")),
+            Core::Koishi => dir_or("YGOCORE_KOISHI_DIR", root.join("core").join("koishi")),
             Core::Custom(ocgcore_dir) => ocgcore_dir.clone(),
         }
     }
@@ -38,38 +41,55 @@ impl Core {
             Core::Custom(_) => "ygopro-core-custom",
         }
     }
+
+    fn prefix(&self) -> &'static str {
+        match self {
+            Core::Official => unreachable!(),
+            Core::Koishi => "koishi_",
+            Core::Custom(_) => "custom_",
+        }
+    }
 }
 
 struct Selection {
     cores: Vec<Core>,
-    dual: bool,
 }
 
 impl Selection {
     fn from_enabled_features() -> Self {
-        let dual = env::var_os("CARGO_FEATURE_DUAL").is_some();
         let official = env::var_os("CARGO_FEATURE_OFFICIAL").is_some();
         let koishi = env::var_os("CARGO_FEATURE_KOISHI").is_some();
         let custom = env::var_os("CARGO_FEATURE_CUSTOM").is_some();
-        if dual {
-            if official || koishi || custom {
-                println!("cargo:warning=feature `dual` takes precedence over `official`, `koishi` and `custom`");
-            }
-            return Self { cores: vec![Core::Official, Core::Koishi], dual: true };
-        }
-        if [official, koishi, custom].iter().filter(|enabled| **enabled).count() > 1 {
-            println!("cargo:warning=enabling more than one of `official`, `koishi`, `custom`; using one of them by priority");
-        }
-        if custom {
-            let ocgcore_dir = PathBuf::from(env::var("YGOPRO_OCGCORE_DIR").unwrap_or_else(|_| {
-                panic!("feature `custom` requires env YGOPRO_OCGCORE_DIR to point to an ocgcore source tree")
-            }));
-            return Self { cores: vec![Core::Custom(ocgcore_dir)], dual: false };
+        let mut cores = Vec::new();
+        if official {
+            cores.push(Core::Official);
         }
         if koishi {
-            return Self { cores: vec![Core::Koishi], dual: false };
+            cores.push(Core::Koishi);
         }
-        Self { cores: vec![Core::Official], dual: false }
+        if custom {
+            if env::var_os("YGOPRO_OCGCORE_DIR").is_some() {
+                println!("cargo:warning=`YGOPRO_OCGCORE_DIR` is renamed to `YGOCORE_CUSTOM_DIR`, and is ignored when the latter is set");
+            }
+            let ocgcore_dir = env::var_os("YGOCORE_CUSTOM_DIR").or_else(|| env::var_os("YGOPRO_OCGCORE_DIR")).map(PathBuf::from).unwrap_or_else(|| {
+                panic!("feature `custom` requires env YGOCORE_CUSTOM_DIR to point to an ocgcore source tree")
+            });
+            cores.push(Core::Custom(ocgcore_dir));
+            if let Some(wrapper) = env::var_os("YGOCORE_CUSTOM_WRAPPER").map(PathBuf::from) {
+                println!("cargo:rustc-cfg=custom_wrapper");
+                println!("cargo:rustc-env=YGOCORE_CUSTOM_WRAPPER={}", wrapper.display());
+                println!("cargo:rerun-if-changed={}", wrapper.display());
+            }
+        }
+        assert!(!cores.is_empty(), "no core selected: enable one of `official`, `koishi` or `custom`");
+        println!("cargo:rustc-check-cfg=cfg(mix_core)");
+        println!("cargo:rustc-check-cfg=cfg(custom_wrapper)");
+        if cores.len() > 1 {
+            println!("cargo:rustc-cfg=mix_core");
+            // It's not needed for this cargo. This metadata is only for downstream crates to know that this crate is built with mix_core enabled.
+            println!("cargo::metadata=mix_core=true");
+        }
+        Self { cores }
     }
 }
 
@@ -83,7 +103,11 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lua.cpp");
     println!("cargo:rerun-if-changed=src/lua_extern_c.h");
     println!("cargo:rerun-if-changed=src/random.cpp");
+    println!("cargo:rerun-if-env-changed=YGOCORE_OFFICIAL_DIR");
+    println!("cargo:rerun-if-env-changed=YGOCORE_KOISHI_DIR");
+    println!("cargo:rerun-if-env-changed=YGOCORE_CUSTOM_DIR");
     println!("cargo:rerun-if-env-changed=YGOPRO_OCGCORE_DIR");
+    println!("cargo:rerun-if-env-changed=YGOCORE_CUSTOM_WRAPPER");
 
     if !lua_dir.exists() {
         panic!("lua not found at {}. Please run: git submodule update --init", lua_dir.display());
@@ -93,13 +117,15 @@ fn main() {
     compile_support(&root, &primary_dir);
     compile_lua(&root, &lua_dir);
 
+    let mix_core = selection.cores.len() > 1;
+
     for core in &selection.cores {
         let ocgcore_dir = core.source_dir(&root);
         println!("cargo:rerun-if-changed={}", ocgcore_dir.display());
         ensure_source_tree(&ocgcore_dir);
         let archive = compile_core(&root, &lua_dir, core, &ocgcore_dir);
-        if selection.dual && matches!(core, Core::Koishi) {
-            rename_symbols(&archive);
+        if mix_core && !matches!(core, Core::Official) {
+            rename_symbols(&archive, core.prefix());
         }
     }
 }
@@ -192,58 +218,58 @@ fn compile_support(root: &Path, ocgcore_dir: &Path) {
     build.compile(SUPPORT_LIBRARY);
 }
 
-fn rename_symbols(archive: &Path) {
-    let symbols = defined_symbols(archive);
+fn rename_symbols(archive: &Path, prefix: &str) {
+    let symbols = defined_symbols(archive, prefix);
     assert!(!symbols.is_empty(), "no defined symbol in {}", archive.display());
     let list_path = archive.with_extension("redefine");
     let mut list = String::new();
     for symbol in &symbols {
         list.push_str(symbol);
         list.push(' ');
-        list.push_str(&prefixed(symbol));
+        list.push_str(&prefixed(symbol, prefix));
         list.push('\n');
     }
     fs::write(&list_path, &list).unwrap();
     let status = Command::new(rust_objcopy()).arg(format!("--redefine-syms={}", list_path.display())).arg(archive).status().expect("failed to run rust-objcopy");
     assert!(status.success(), "rust-objcopy failed on {}", archive.display());
-    let leaked: Vec<_> = defined_symbols(archive).into_iter().filter(|symbol| !is_prefixed(symbol)).collect();
+    let leaked: Vec<_> = defined_symbols(archive, prefix).into_iter().filter(|symbol| !is_prefixed(symbol, prefix)).collect();
     assert!(leaked.is_empty(), "{} symbols left unprefixed in {}: {:?}", leaked.len(), archive.display(), &leaked[..leaked.len().min(10)]);
 }
 
-fn is_prefixed(symbol: &str) -> bool {
+fn is_prefixed(symbol: &str, prefix: &str) -> bool {
     match symbol.strip_prefix('_') {
-        Some(rest) if target_os() == "macos" => rest.starts_with(KOISHI_PREFIX),
-        _ => symbol.starts_with(KOISHI_PREFIX),
+        Some(rest) if target_os() == "macos" => rest.starts_with(prefix),
+        _ => symbol.starts_with(prefix),
     }
 }
 
-fn prefixed(symbol: &str) -> String {
+fn prefixed(symbol: &str, prefix: &str) -> String {
     match symbol.strip_prefix('_') {
-        Some(rest) if target_os() == "macos" => format!("_{}{}", KOISHI_PREFIX, rest),
-        _ => format!("{}{}", KOISHI_PREFIX, symbol),
+        Some(rest) if target_os() == "macos" => format!("_{}{}", prefix, rest),
+        _ => format!("{}{}", prefix, symbol),
     }
 }
 
-fn defined_symbols(archive: &Path) -> BTreeSet<String> {
+fn defined_symbols(archive: &Path, prefix: &str) -> BTreeSet<String> {
     match target_os().as_str() {
-        "windows" => coff_symbols(archive),
-        _ => nm_symbols(archive),
+        "windows" => coff_symbols(archive, prefix),
+        _ => nm_symbols(archive, prefix),
     }
 }
 
-fn nm_symbols(archive: &Path) -> BTreeSet<String> {
+fn nm_symbols(archive: &Path, prefix: &str) -> BTreeSet<String> {
     let output = Command::new("nm").args(["-P", "--defined-only", "--extern-only"]).arg(archive).output().expect("failed to run nm");
     assert!(output.status.success(), "nm failed on {}", archive.display());
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| !line.ends_with(':'))
         .filter_map(|line| line.split_whitespace().next())
-        .filter(|symbol| !symbol.is_empty() && !is_prefixed(symbol))
+        .filter(|symbol| !symbol.is_empty() && !is_prefixed(symbol, prefix))
         .map(str::to_owned)
         .collect()
 }
 
-fn coff_symbols(archive: &Path) -> BTreeSet<String> {
+fn coff_symbols(archive: &Path, prefix: &str) -> BTreeSet<String> {
     let output = Command::new(dumpbin()).arg("/symbols").arg(archive).output().expect("failed to run dumpbin");
     assert!(output.status.success(), "dumpbin failed on {}", archive.display());
     let mut symbols = BTreeSet::new();
@@ -254,7 +280,7 @@ fn coff_symbols(archive: &Path) -> BTreeSet<String> {
         }
         let Some(index) = line.find('|') else { continue };
         let symbol = line[index + 1..].split_whitespace().next().unwrap_or("");
-        if !symbol.is_empty() && !is_prefixed(symbol) {
+        if !symbol.is_empty() && !is_prefixed(symbol, prefix) {
             symbols.insert(symbol.to_owned());
         }
     }

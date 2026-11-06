@@ -659,7 +659,7 @@ fn on_client_join_final(join: &mut ygopro::ClientJoin) {
 #[register_to(YGOPRO_HANDLERS_EX as HandlerEx)]
 fn on_generate_replay(duel: &mut Duel, states: &mut anymap3::Map<dyn std::any::Any + Send>) {
     let Some(replay) = duel.create_replay() else { return };
-    states.insert(stoc::Replay { replay: Box::new(replay) });
+    states.insert(stoc::Replay { replay });
 }
 
 #[handler(ygopro::GenerateReplay, priority = 255)]

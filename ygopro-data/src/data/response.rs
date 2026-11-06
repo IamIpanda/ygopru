@@ -198,7 +198,7 @@ impl Response {
             gm::MessageType::SelectEffectYesNo | gm::MessageType::SelectYesNo => Ok(Response::SelectYesNo(u8::read_options(reader, endian, ())? != 0)),
             gm::MessageType::SelectOption | gm::MessageType::AnnounceNumber => Ok(Response::SelectOption(u8::read_options(reader, endian, ())?)),
             gm::MessageType::SelectPosition => Ok(Response::SelectPosition(Position::read_options(reader, endian, ())?)),
-            gm::MessageType::SelectCounter => Ok(Response::SelectCounter(until_eof::<_, u16, (), Vec<u16>>(reader, endian, ())?)),
+            gm::MessageType::SelectCounter => Ok(Response::SelectCounter(until_eof::<Vec<u16>, u16, (), _>(reader, endian, ())?)),
             gm::MessageType::AnnounceRace => Ok(Response::AnnounceRace(Race::read_options(reader, endian, ())?)),
             gm::MessageType::AnnounceAttribute => Ok(Response::AnnounceAttribute(Attribute::read_options(reader, endian, ())?)),
             gm::MessageType::AnnounceCard => Ok(Response::AnnounceCard(u32::read_options(reader, endian, ())?)),
@@ -250,7 +250,7 @@ impl Response {
                 if read_all_remaining(reader)? == &[0xffu8] {
                     return Ok(Response::KeepCardOrder);
                 }
-                Ok(Response::SortCards(until_eof::<_, u16, (), Vec<u16>>(reader, endian, ())?))
+                Ok(Response::SortCards(until_eof::<Vec<u16>, u16, (), _>(reader, endian, ())?))
             }
             _ => Err(binrw::Error::NoVariantMatch { pos: reader.stream_position()? }),
         }
@@ -263,7 +263,7 @@ impl BinRead for Response {
     fn read_options<R: Read + Seek>(reader: &mut R, endian: binrw::Endian, message_type: Self::Args<'_>) -> binrw::BinResult<Self> {
         match message_type {
             Some(message_type) => Self::parse(reader, endian, message_type),
-            None => Ok(Response::Unknown(until_eof::<_, u8, (), Vec<u8>>(reader, endian, ())?)),
+            None => Ok(Response::Unknown(until_eof::<Vec<u8>, u8, (), _>(reader, endian, ())?)),
         }
     }
 }

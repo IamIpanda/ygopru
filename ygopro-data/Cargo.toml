@@ -1,6 +1,6 @@
 [package]
 name = "ygopro-data"
-version = "0.1.6"
+version = "0.1.7"
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
@@ -10,7 +10,7 @@ keywords = ["ygopro"]
 
 
 [dependencies]
-binrw = "0.13"
+binrw = "0.15"
 bitflags = "2.4"
 encoding_rs = "0.8"
 lzma-rs = "0.3"

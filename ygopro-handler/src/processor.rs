@@ -64,26 +64,14 @@ impl MessageKey<u8> for u8 {
     }
 }
 
-impl MessageKey<u8> for complex::Complex<ctos::Message> {
+impl<Message> MessageKey<u8> for complex::Complex<Message> {
     fn message_key(&self) -> u8 {
-        self.data[0]
-    }
-}
-
-impl MessageKey<u8> for complex::Complex<stoc::Message> {
-    fn message_key(&self) -> u8 {
-        self.data[0]
-    }
-}
-
-impl MessageKey<u8> for complex::Complex<gm::Message> {
-    fn message_key(&self) -> u8 {
-        self.data[0]
+        self.message_flag()
     }
 }
 
 macro_rules! impl_message_key {
-    ($message_mod:ident, $($variant:ident = $flag:literal),* $(,)?) => {
+    ($message_mod:ident, $($( [$boxed:ident] )? $variant:ident = $flag:literal,)*) => {
         impl $crate::processor::MessageKey<u8> for $message_mod::MessageType {
             fn message_key(&self) -> u8 {
                 u8::from(self)
@@ -92,7 +80,8 @@ macro_rules! impl_message_key {
         impl $crate::processor::MessageKey<u8> for $message_mod::Message {
             fn message_key(&self) -> u8 {
                 match self {
-                    $($message_mod::Message::$variant(_) => $flag),*
+                    $($message_mod::Message::$variant(_) => $flag,)*
+                    $message_mod::Message::Unknown(data) => data.first().copied().unwrap_or(0),
                 }
             }
         }

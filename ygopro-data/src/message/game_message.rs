@@ -25,7 +25,7 @@ include!(concat!(env!("OUT_DIR"), "/game_message.rs"));
 every_game_message_flat_message!(crate::generate_enum);
 
 macro_rules! impl_into_stoc_message {
-    ($($message_name:ident=$message_flag:literal),*) => {
+    ($($( [$boxed:ident] )? $message_name:ident = $message_flag:literal,)*) => {
         $(
             impl From<$message_name> for crate::message::server_to_client::Message {
                 fn from(value: $message_name) -> Self {
@@ -84,21 +84,24 @@ impl GameMessage for Vec<u32> {
 impl<T> MaskedClone for T where T: GameMessage + Clone {}
 
 macro_rules! impl_mask_for_message {
-    ($($message_name:ident=$message_flag:literal),*) => {
+    ($($( [$boxed:ident] )? $message_name:ident = $message_flag:literal,)*) => {
         impl GameMessage for Message {
             fn mask(&mut self) {
                 match self {
-                    $(Message::$message_name(inner) => inner.mask()),*
+                    $(Message::$message_name(inner) => inner.mask(),)*
+                    Message::Unknown(_) => (),
                 }
             }
             fn should_mask(&self, player: CorePlayer) -> bool {
                 match self {
-                    $(Message::$message_name(inner) => inner.should_mask(player)),*
+                    $(Message::$message_name(inner) => inner.should_mask(player),)*
+                    Message::Unknown(_) => false,
                 }
             }
             fn waiting_for(&self) -> Option<CorePlayer> {
                 match self {
-                    $(Message::$message_name(inner) => inner.waiting_for()),*
+                    $(Message::$message_name(inner) => inner.waiting_for(),)*
+                    Message::Unknown(_) => None,
                 }
             }
         }
@@ -128,12 +131,23 @@ pub struct Hint {
 #[repr(C)]
 pub struct Waiting;
 
+#[bitfield]
+#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, Debug)]
+#[br(map = Self::from_bytes)]
+#[bw(map = |&x| Self::into_bytes(x))]
+#[repr(u8)]
+pub struct PlayerType {
+    pub player: CorePlayer,
+    pub is_observer: bool,
+    #[skip] __: B3,
+}
+
 #[binrw]
 #[derive(Debug, Clone, Message, GameMessage)]
 #[message(gm, flag = 4)]
 #[repr(C)]
 pub struct Start {
-    pub player_type: u8,
+    pub player_type: PlayerType,
     pub rule: MasterRule,
     pub player1_lp: i32,
     pub player2_lp: i32,
@@ -207,7 +221,7 @@ pub struct SelectBattleCommand {
 
 #[binrw]
 #[derive(Debug, Clone, Message, GameMessage)]
-#[message(gm, flag = 11)]
+#[message(gm, flag = 11, boxed)]
 #[repr(C)]
 pub struct SelectIdleCommand {
     #[wait_for]
@@ -1225,7 +1239,7 @@ pub struct ChainLink {
 
 #[binrw]
 #[derive(Debug, Clone, Message, GameMessage)]
-#[message(gm, flag = 162)]
+#[message(gm, flag = 162, boxed)]
 #[repr(C)]
 pub struct ReloadField {
     pub duel_rule: MasterRule,
@@ -1323,15 +1337,15 @@ impl From<(&SibylChat, Option<&SibylName>)> for crate::message::server_to_client
 
 #[binrw]
 #[derive(Debug, Clone, Message, GameMessage)]
-#[message(gm, flag = 231)]
+#[message(gm, flag = 231, boxed)]
 #[cfg(feature = "forge")]
 pub struct SibylReplay {
-    pub replay: Box<crate::data::Replay>
+    pub replay: crate::data::Replay
 }
 
 #[binrw]
 #[derive(Debug, Clone, Message, GameMessage)]
-#[message(gm, flag = 235)]
+#[message(gm, flag = 235, boxed)]
 #[cfg(feature = "forge")]
 pub struct SibylName {
     pub host_name: crate::utils::string::FixedLengthString<50>,
@@ -1363,7 +1377,7 @@ impl SibylName {
             if name == speaker { return Netplayer::Player(index).into() }
         }
         match speaker {
-            "[System]" => Color::Lightblue.into(),
+            "[System]" => Color::System.into(),
             _ => Netplayer::Observer(255).into()
         }
     }
@@ -1384,13 +1398,13 @@ mod test {
     #[test]
     fn print_sizes() {
         macro_rules! print_size {
-            ($($msg:ident = $flag:literal),* $(,)?) => {
+            ($($( [$boxed:ident] )? $msg:ident = $flag:literal,)*) => {
                 println!("=== GM ===");
                 $(
-                    println!("  {:30}: {:>4} bytes", stringify!($msg), std::mem::size_of::<super::$msg>());
+                    println!("  {:6} {:30}: {:>4} bytes", stringify!($($boxed)?), stringify!($msg), std::mem::size_of::<super::$msg>());
                 )*
-                println!("  {:30}: {:>4} bytes", "MessageType", std::mem::size_of::<super::MessageType>());
-                println!("  {:30}: {:>4} bytes", "Message", std::mem::size_of::<super::Message>());
+                println!("  {:6} {:30}: {:>4} bytes", "", "MessageType", std::mem::size_of::<super::MessageType>());
+                println!("  {:6} {:30}: {:>4} bytes", "", "Message", std::mem::size_of::<super::Message>());
             };
         }
         every_game_message_flat_message!(print_size);

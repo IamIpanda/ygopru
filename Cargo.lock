@@ -134,9 +134,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "binrw"
-version = "0.13.4"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "768230c3e8ce988f15f99af8d0d2c3afd0a656b88b35480fb1f924699e810e57"
+checksum = "6ad120d555272286c1017d25165ab8bd74806f13fc85b258484ec7e4ce75458f"
 dependencies = [
  "array-init",
  "binrw_derive",
@@ -145,15 +145,15 @@ dependencies = [
 
 [[package]]
 name = "binrw_derive"
-version = "0.13.4"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08118044b6695ea0de85ecdaac53adeb0d5d024770a904f45b9453ad3c12898c"
+checksum = "6df92e0e9baae4dc82c7bad7715ca40c0a5c71539057bf2ea04a5c29c980410b"
 dependencies = [
  "either",
  "owo-colors",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1164,9 +1164,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "owo-colors"
-version = "3.5.0"
+version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
+checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
 
 [[package]]
 name = "parking_lot"
@@ -2066,7 +2066,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "ygopro"
-version = "0.1.10"
+version = "0.2.0"
 dependencies = [
  "anymap3",
  "arc-swap",
@@ -2099,7 +2099,7 @@ dependencies = [
 
 [[package]]
 name = "ygopro-core-wrapper"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "cc",
  "glob",
@@ -2113,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "ygopro-data"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "binrw",
  "bitflags 2.13.1",
@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "ygopro-derive"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -2142,7 +2142,7 @@ dependencies = [
 
 [[package]]
 name = "ygopro-external-mobile-bridge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hashbrown 0.17.1",
  "jni",
@@ -2152,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "ygopro-external-server-bridge"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "binrw",
@@ -2162,14 +2162,13 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "ygopro-core-wrapper",
  "ygopro-data",
  "ygopro-handler",
 ]
 
 [[package]]
 name = "ygopro-handler"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anymap3",
  "binrw",

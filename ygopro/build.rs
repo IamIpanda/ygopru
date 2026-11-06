@@ -20,4 +20,10 @@ fn main() {
     println!("cargo:rustc-env=YGOPRO_VERSION_MAJOR={}", version.major);
     println!("cargo:rustc-env=YGOPRO_VERSION_MINOR={}", version.minor);
     println!("cargo:rustc-env=YGOPRO_VERSION_PATCH={}", version.patch);
+
+    println!("cargo:rerun-if-env-changed=DEP_YGOPRO_CORE_MIX_CORE");
+    println!("cargo:rustc-check-cfg=cfg(mix_core)");
+    if env::var_os("DEP_YGOPRO_CORE_MIX_CORE").is_some() {
+        println!("cargo:rustc-cfg=mix_core");
+    }
 }

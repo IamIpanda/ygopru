@@ -78,7 +78,7 @@ prepare_upstream_suffixes() {
     local entry_rest="${entry#*|}"
     local crate_directory="${entry_rest%%|*}"
     local crate_version="${entry_rest#*|}"
-    local core_directory="$crate_directory/official/ocgcore"
+    local core_directory="$crate_directory/core/official"
     if [[ -d "$core_directory" ]]; then
       if [[ ! -d "$core_directory/.git" && ! -f "$core_directory/.git" ]]; then
         echo "official core submodule of $crate_name is not checked out at $core_directory" >&2

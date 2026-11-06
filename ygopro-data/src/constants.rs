@@ -104,7 +104,8 @@ impl Specifier for Netplayer {
 /// relate `Netplayer` and `CorePlayer` is the downstream's own responsibility.
 ///
 /// See also: [`Netplayer`].
-#[derive(BinRead, BinWrite, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug, PartialOrd, Ord, Hash)]
+#[derive(BinRead, BinWrite, Specifier, Copy, Clone, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Debug, PartialOrd, Ord, Hash)]
+#[bits=4]
 #[brw(repr=u8)]
 #[repr(u8)]
 pub enum CorePlayer {
@@ -617,7 +618,9 @@ pub enum DuelStage {
 #[repr(u8)]
 pub enum Color {
     Observer = 7,
-    Lightblue = 8,
+    System = 8,
+    Error = 9,
+    Hidden = 10,
     Red = 11,
     Green = 12,
     Blue = 13,
@@ -633,7 +636,9 @@ impl std::fmt::Display for Color {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Color::Observer => "OBSERVER",
-            Color::Lightblue => "LIGHTBLUE",
+            Color::System => "SYSTEM",
+            Color::Error => "ERROR",
+            Color::Hidden => "HIDDEN",
             Color::Red => "RED",
             Color::Green => "GREEN",
             Color::Blue => "BLUE",
@@ -653,7 +658,9 @@ impl std::str::FromStr for Color {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(match value.to_ascii_uppercase().as_str() {
             "OBSERVER" => Color::Observer,
-            "LIGHTBLUE" => Color::Lightblue,
+            "SYSTEM" => Color::System,
+            "ERROR" => Color::Error,
+            "HIDDEN" => Color::Hidden,
             "RED" => Color::Red,
             "GREEN" => Color::Green,
             "BLUE" => Color::Blue,

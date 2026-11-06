@@ -29,6 +29,7 @@ use linkme::distributed_slice;
 pub mod bo;
 pub mod no_init_shuffle_deck;
 pub mod preload_script;
+pub mod print;
 pub mod replay;
 pub mod reconnect;
 pub mod registry;

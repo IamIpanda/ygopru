@@ -11,7 +11,9 @@ use darling::FromAttributes;
 #[derive(FromAttributes, Debug)]
 #[darling(attributes(message), allow_unknown_fields)]
 struct MessageParameters {
-    flag: u8
+    flag: u8,
+    #[darling(default)]
+    boxed: darling::util::Flag
 }
 
 fn scan_dir(path: OsString) -> io::Result<()> {
@@ -56,10 +58,11 @@ fn generate_content(name: OsString, structs: Vec<syn::ItemStruct>) {
         .iter()
         .filter_map(|item_struct| {
             let parameter = MessageParameters::from_attributes(&item_struct.attrs).ok()?;
-            Some(format!("{}{} = {}u8", prefix, item_struct.ident.to_string(), parameter.flag))
+            let mark = if parameter.boxed.is_present() { "[Boxed] " } else { "" };
+            Some(format!("{}{}{} = {}u8,", mark, prefix, item_struct.ident.to_string(), parameter.flag))
         })
         .collect::<Vec<_>>()
-        .join(",\n            ")
+        .join("\n            ")
     };
     let macro_calls_simple = format("");
     let macro_calls_long = format(&format!("ygopro::message::{}::", module_name));

@@ -63,12 +63,12 @@ pub(crate) fn log_plugin_statistics(
     }
 }
 
-#[cfg(feature = "dual")]
+#[cfg(mix_core)]
 pub(crate) fn new_core_duel(configuration: &Configuration, seed: core::DuelSeed) -> core::Duel {
     core::Duel::new(seed, configuration.configurations.get::<core::CoreKind>().copied().unwrap_or_default())
 }
 
-#[cfg(not(feature = "dual"))]
+#[cfg(not(mix_core))]
 pub(crate) fn new_core_duel(_: &Configuration, seed: core::DuelSeed) -> core::Duel {
     core::Duel::new(seed)
 }

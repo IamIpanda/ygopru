@@ -46,7 +46,7 @@ pub struct Configuration {
 fn on_tp_result(duel: &mut Duel, config: Configuration) {
     for script in &config.preloaded_scripts {
         if duel.preload_script(script) == 0 {
-            log::debug!("Failed to preload script: {script}");
+            log::warn!("Failed to preload script: {script}");
         }
     }
 }

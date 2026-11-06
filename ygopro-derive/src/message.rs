@@ -43,6 +43,9 @@ fn parse_parameters(attrs: &[Attribute]) -> darling::Result<(Direction, MessageP
     let named: Vec<syn::NestedMeta> = nested.into_iter().filter_map(|item| match item {
         syn::NestedMeta::Meta(syn::Meta::Path(path)) => {
             let name = path.get_ident().map(|ident| ident.to_string()).unwrap_or_default();
+            if name == "boxed" {
+                return None;
+            }
             direction = Some(match name.as_str() {
                 "ctos" => Direction::Standard("CTOS"),
                 "stoc" => Direction::Standard("STOC"),

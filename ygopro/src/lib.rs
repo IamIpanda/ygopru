@@ -46,7 +46,12 @@ macro_rules! core_message_handler {
             let mut buffer = [0u8; 1024];
             unsafe { $get_log_message(pduel, buffer.as_mut_ptr()) };
             let c_message = unsafe { CStr::from_ptr(buffer.as_ptr() as *const c_char) };
-            log::debug!("core message[{}]: {}", message_type, c_message.to_string_lossy());
+            let message = c_message.to_string_lossy();
+            match message_type {
+                1 => log::error!("{message}"),
+                2 => log::info!("{message}"),
+                _ => log::warn!("core message[{message_type}]: {message}"),
+            }
             0
         }
         $handler
@@ -58,16 +63,20 @@ macro_rules! core_message_handler {
 /// [`set_card_reader`](ygopro_core_wrapper::set_card_reader),
 /// [`set_message_handler`](ygopro_core_wrapper::set_message_handler)).
 pub fn init_core() {
-    #[cfg(feature = "dual")]
+    #[cfg(mix_core)]
     unsafe {
-        ygopro_core_wrapper::official::set_script_reader(Some(data_manager::script_reader));
-        ygopro_core_wrapper::official::set_card_reader(Some(data_manager::card_reader));
-        ygopro_core_wrapper::official::set_message_handler(Some(core_message_handler!(h1, ygopro_core_wrapper::official::get_log_message)));
-        ygopro_core_wrapper::koishi::set_script_reader(Some(data_manager::script_reader));
-        ygopro_core_wrapper::koishi::set_card_reader(Some(data_manager::card_reader));
-        ygopro_core_wrapper::koishi::set_message_handler(Some(core_message_handler!(h2, ygopro_core_wrapper::koishi::get_log_message)));
+        #[cfg(feature = "official")] {
+            ygopro_core_wrapper::official::set_script_reader(Some(data_manager::script_reader));
+            ygopro_core_wrapper::official::set_card_reader(Some(data_manager::card_reader));
+            ygopro_core_wrapper::official::set_message_handler(Some(core_message_handler!(ho, ygopro_core_wrapper::official::get_log_message)));
+        }
+        #[cfg(feature = "koishi")] {
+            ygopro_core_wrapper::koishi::set_script_reader(Some(data_manager::script_reader));
+            ygopro_core_wrapper::koishi::set_card_reader(Some(data_manager::card_reader));
+            ygopro_core_wrapper::koishi::set_message_handler(Some(core_message_handler!(h2, ygopro_core_wrapper::koishi::get_log_message)));
+        }
     }
-    #[cfg(not(feature = "dual"))]
+    #[cfg(not(mix_core))]
     unsafe {
         ygopro_core_wrapper::set_script_reader(Some(data_manager::script_reader));
         ygopro_core_wrapper::set_card_reader(Some(data_manager::card_reader));

@@ -1,6 +1,6 @@
 [package]
 name = "ygopro"
-version = "0.1.10"
+version = "0.2.0"
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
@@ -19,7 +19,7 @@ name = "ygopro"
 path = "src/main.rs"
 
 [dependencies]
-binrw = "0.13"
+binrw = "0.15"
 futures = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
@@ -51,14 +51,14 @@ semver = "1"
 toml = "0.9"
 
 [features]
-default = ["zip", "card", "forge"]
+default = ["zip", "card", "forge", "official"]
 zip = ["dep:zip"]
 card = [
-    "ygopro-core-wrapper/card",
     "ygopro-data/card",
 ]
+official = ["ygopro-core-wrapper/official"]
 koishi = ["ygopro-core-wrapper/koishi"]
-dual = ["ygopro-core-wrapper/dual"]
+custom = ["ygopro-core-wrapper/custom"]
 forge = ["ygopro-data/forge"]
 
 [package.metadata]

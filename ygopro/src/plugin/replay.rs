@@ -195,7 +195,7 @@ fn generate_replay_binary(format: Format, include_chat: bool, duel: &Duel, repla
                     if directed.contains(&recorded.message_key()) { return None }
                     match recorded {
                         stoc::Message::GameMessage(game_message) => match &game_message.message {
-                            gm::Message::Start(start) if start.player_type & 0xf0 == 0 => None,
+                            gm::Message::Start(start) if !start.player_type.is_observer() => None,
                             _ => Some(Complex::from_message(stoc::Message::from(game_message.message.clone_masked()))),
                         },
                         stoc::Message::Chat(_) if !include_chat => None,

@@ -156,8 +156,8 @@ impl TagDuel {
             while let Some(request) = stream.next().await {
                 match request {
                     Request::Message(request) => {
-                        if !duel.get_net(request.extra).map_or(true, |p| p.state.allowed(&request.message)) {
-                            warn!("Message type mismatch for player: {:?}, get {:?}", request.extra, ctos::MessageType::from(&request.message));
+                        if let Some(player) = duel.get_net(request.extra) && !player.state.allowed(&request.message) {
+                            warn!("Message type mismatch for player: {:?}, get {:?}, expected {}", request.extra, ctos::MessageType::from(&request.message), player.state);
                             continue;
                         }
                         let (returned_duel, request, returned_states, response) = duel.run_processor(&ygopro_processor, request, states).await;
@@ -677,7 +677,7 @@ pub mod ygopro_handlers {
         let extra1 = duel.query_field_count(CorePlayer::FirstAttackPlayer, Location::Extra) as u16;
         let deck2 = duel.query_field_count(CorePlayer::SecondAttackPlayer, Location::Deck) as u16;
         let extra2 = duel.query_field_count(CorePlayer::SecondAttackPlayer, Location::Extra) as u16;
-        let start = |player_type: u8| gm::Message::Start(gm::Start {
+        let start = |player_type: gm::PlayerType| gm::Message::Start(gm::Start {
             player_type,
             rule: duel_rule,
             player1_lp: start_lp,
@@ -692,9 +692,10 @@ pub mod ygopro_handlers {
         } else {
             (TeamIndex::Team2.member(), TeamIndex::Team1.member())
         };
-        for player in first_attack_members { duel.sender.send(start(0).into(), SendTarget::Single(player.into())); }
-        for player in second_attack_members { duel.sender.send(start(1).into(), SendTarget::Single(player.into())); }
-        let observer_player_type = if first_attack_team == TeamIndex::Team1 { 0x10 } else { 0x11 };
+        for player in first_attack_members { duel.sender.send(start(gm::PlayerType::new().with_player(CorePlayer::FirstAttackPlayer)).into(), SendTarget::Single(player.into())); }
+        for player in second_attack_members { duel.sender.send(start(gm::PlayerType::new().with_player(CorePlayer::SecondAttackPlayer)).into(), SendTarget::Single(player.into())); }
+        let observer_player = if first_attack_team == TeamIndex::Team1 { CorePlayer::FirstAttackPlayer } else { CorePlayer::SecondAttackPlayer };
+        let observer_player_type = gm::PlayerType::new().with_player(observer_player).with_is_observer(true);
         duel.sender.send(start(observer_player_type).into(), SendTarget::AllObserver);
         duel.refresh(CorePlayer::All, Location::Extra, -1, Query::empty(), transformer);
     }

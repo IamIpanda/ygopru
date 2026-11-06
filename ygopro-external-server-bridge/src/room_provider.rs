@@ -26,13 +26,14 @@ use tokio_util::codec::FramedRead;
 use tokio_util::codec::FramedWrite;
 use tokio_util::codec::LengthDelimitedCodec;
 
-use ygopro_core_wrapper::random::SEED_COUNT;
 use ygopro_data::complex::Complex;
 use ygopro_data::message::ctos;
 use ygopro_data::message::stoc;
 use ygopro_data::message::HostInfo;
 
 use ygopro_handler::RoomProvider;
+
+const SEED_COUNT: usize = 8;
 
 /// A factory that spawns external ygopro binary processes.
 pub struct YgoproBinaryFactory {

@@ -269,6 +269,9 @@ pub mod complex {
             &self.data
         }
 
+        pub fn message_flag(&self) -> u8 {
+            self.data.first().copied().unwrap_or(u8::MAX)
+        }
     }
 
     impl<Message> Clone for Complex<Message> {
@@ -345,17 +348,17 @@ pub mod complex {
 
     impl<Message> From<&Complex<Message>> for crate::message::client_to_server::MessageType {
         fn from(value: &Complex<Message>) -> Self {
-            Self::from(value.data[0])
+            Self::from(value.message_flag())
         }
     }
     impl<Message> From<&Complex<Message>> for crate::message::server_to_client::MessageType {
         fn from(value: &Complex<Message>) -> Self {
-            Self::from(value.data[0])
+            Self::from(value.message_flag())
         }
     }
     impl<Message> From<&Complex<Message>> for crate::message::game_message::MessageType {
         fn from(value: &Complex<Message>) -> Self {
-            Self::from(value.data[0])
+            Self::from(value.message_flag())
         }
     }
 }

@@ -117,7 +117,8 @@ macro_rules! impl_variant_ref {
         {
             fn from_request(bundle: &mut Bundle<Request<$message_mod::Message, Extra>, State, Res>) -> Option<Self> {
                 if let $message_mod::Message::$variant(inner) = &bundle.request.message {
-                    Some(unsafe { &*(inner as *const $message_mod::$variant) })
+                    let value: &$message_mod::$variant = std::convert::Into::into(inner);
+                    Some(unsafe { &*(value as *const $message_mod::$variant) })
                 } else {
                     None
                 }
@@ -131,7 +132,8 @@ macro_rules! impl_variant_ref {
         {
             fn from_request(bundle: &mut Bundle<$message_mod::Message, State, Res>) -> Option<Self> {
                 if let $message_mod::Message::$variant(inner) = &bundle.request {
-                    Some(unsafe { &*(inner as *const $message_mod::$variant) })
+                    let value: &$message_mod::$variant = std::convert::Into::into(inner);
+                    Some(unsafe { &*(value as *const $message_mod::$variant) })
                 } else {
                     None
                 }
@@ -150,7 +152,8 @@ macro_rules! impl_variant_complex_ref {
         {
             fn from_request(bundle: &mut Bundle<Request<Complex<$message_mod::Message>, Extra>, State, Res>) -> Option<Self> {
                 if let $message_mod::Message::$variant(inner) = &*bundle.request.message {
-                    Some(unsafe { &*std::ptr::from_ref(inner) })
+                    let value: &$message_mod::$variant = std::convert::Into::into(inner);
+                    Some(unsafe { &*(value as *const $message_mod::$variant) })
                 } else {
                     None
                 }
@@ -164,7 +167,8 @@ macro_rules! impl_variant_complex_ref {
         {
             fn from_request(bundle: &mut Bundle<Complex<$message_mod::Message>, State, Res>) -> Option<Self> {
                 if let $message_mod::Message::$variant(inner) = &*bundle.request {
-                    Some(unsafe { &*std::ptr::from_ref(inner) })
+                    let value: &$message_mod::$variant = std::convert::Into::into(inner);
+                    Some(unsafe { &*(value as *const $message_mod::$variant) })
                 } else {
                     None
                 }
@@ -184,7 +188,8 @@ macro_rules! impl_variant_gm_from_stoc {
             fn from_request(bundle: &mut Bundle<Request<Complex<stoc::Message>, Extra>, State, Res>) -> Option<Self> {
                 if let stoc::Message::GameMessage(game_message) = &*bundle.request.message {
                     if let gm::Message::$variant(inner) = &game_message.message {
-                        return Some(unsafe { &*std::ptr::from_ref(inner) });
+                        let value: &gm::$variant = std::convert::Into::into(inner);
+                        return Some(unsafe { &*(value as *const gm::$variant) });
                     }
                 }
                 None
@@ -199,7 +204,8 @@ macro_rules! impl_variant_gm_from_stoc {
             fn from_request(bundle: &mut Bundle<Complex<stoc::Message>, State, Res>) -> Option<Self> {
                 if let stoc::Message::GameMessage(game_message) = &*bundle.request {
                     if let gm::Message::$variant(inner) = &game_message.message {
-                        return Some(unsafe { &*std::ptr::from_ref(inner) });
+                        let value: &gm::$variant = std::convert::Into::into(inner);
+                        return Some(unsafe { &*(value as *const gm::$variant) });
                     }
                 }
                 None
@@ -212,14 +218,14 @@ macro_rules! impl_variant_gm_response_as_stoc {
     ($variant:ident) => {
         impl IntoResponse<Response<stoc::Message>> for gm::$variant {
             fn into_response(self) -> Response<stoc::Message> {
-                Response::Replace(gm::Message::$variant(self).into())
+                Response::Replace(gm::Message::from(self).into())
             }
         }
     };
 }
 
 macro_rules! impl_ctos {
-    ($($variant:ident = $flag:literal),* $(,)?) => {
+    ($($( [$boxed:ident] )? $variant:ident = $flag:literal,)*) => {
         $( impl_variant_ref!(ctos, $variant); )*
         $( impl_variant_complex_ref!(ctos, $variant); )*
         $( impl_variant_response!(ctos, $variant); )*
@@ -227,7 +233,7 @@ macro_rules! impl_ctos {
 }
 
 macro_rules! impl_stoc {
-    ($($variant:ident = $flag:literal),* $(,)?) => {
+    ($($( [$boxed:ident] )? $variant:ident = $flag:literal,)*) => {
         $( impl_variant_ref!(stoc, $variant); )*
         $( impl_variant_complex_ref!(stoc, $variant); )*
         $( impl_variant_response!(stoc, $variant); )*
@@ -235,7 +241,7 @@ macro_rules! impl_stoc {
 }
 
 macro_rules! impl_gm {
-    ($($variant:ident = $flag:literal),* $(,)?) => {
+    ($($( [$boxed:ident] )? $variant:ident = $flag:literal,)*) => {
         $( impl_variant_ref!(gm, $variant); )*
         $( impl_variant_complex_ref!(gm, $variant); )*
         $( impl_variant_response!(gm, $variant); )*
@@ -331,7 +337,7 @@ macro_rules! impl_variant_response {
     ($message_mod:ident, $variant:ident) => {
         impl IntoResponse<Response<$message_mod::Message>> for $message_mod::$variant {
             fn into_response(self) -> Response<$message_mod::Message> {
-                Response::Replace($message_mod::Message::$variant(self))
+                Response::Replace($message_mod::Message::from(self))
             }
         }
     };

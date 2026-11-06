@@ -206,9 +206,10 @@ macro_rules! generate_enum {
         /// It wraps every message variant, and is never sent over the network.
         ///
         /// In doc and code, this enum is often written as `ygopro::Message`.
+        #[repr(u8)]
         #[derive(Debug)]
         pub enum Message {
-            $($message_name($message_name)),*
+            $($message_name($message_name) = $message_flag),*
         }
 
         impl ygopro_data::message::PureMessage for Message {}

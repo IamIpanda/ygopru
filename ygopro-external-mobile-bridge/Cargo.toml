@@ -1,6 +1,6 @@
 [package]
 name = "ygopro-external-mobile-bridge"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license-file.workspace = true
 repository.workspace = true
@@ -20,7 +20,9 @@ jni = "0.21"
 parking_lot = { version = "0", features = ["arc_lock", "send_guard"] }
 
 [features]
-default = ["card", "zip"]
+default = ["card", "zip", "official"]
 card = ["ygopro/card"]
 zip = ["ygopro/zip"]
+official = ["ygopro/official"]
 koishi = ["ygopro/koishi"]
+custom = ["ygopro/custom"]

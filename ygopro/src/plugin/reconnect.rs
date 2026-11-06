@@ -8,6 +8,7 @@ use std::io::Cursor;
 use binrw::BinRead;
 use linkme::distributed_slice;
 
+use ygopro_data::complex::Complex;
 use ygopro_data::message::gm::GameMessage;
 use ygopro_derive::*;
 use ygopro_data::constants::*;
@@ -72,17 +73,17 @@ fn on_recreate_duel(attachment: &mut Attachment) {
 
 #[handler(ctos::RequestField)]
 #[register_to(SINGLE_DUEL_YGOPRO_HANDLERS as SingleDuelYgoproHandler)]
-fn on_request_field_single(duel: &mut SingleDuel, transformer: SinglePlayerTransformer, states: &mut anymap3::Map<dyn std::any::Any + Send>, player: PlayerIndex) -> Vec<stoc::Message> {
+fn on_request_field_single(duel: &mut SingleDuel, transformer: SinglePlayerTransformer, states: &mut anymap3::Map<dyn std::any::Any + Send>, player: PlayerIndex) {
     let attachment = match states.get::<Attachment>() {
         Some(attachment) => attachment,
-        None => return vec![],
+        None => return,
     };
 
-    let mut messages = vec![];
+    let mut messages: Vec<stoc::Message> = vec![];
     messages.push(stoc::DuelStart.into());
 
     let core_player = transformer.to_core_player(player.into());
-    let player_type = core_player as u8;
+    let player_type = gm::PlayerType::new().with_player(core_player);
     let start_lp = duel.host_info.start_lp as i32;
     messages.push(gm::Start {
         player_type,
@@ -158,22 +159,28 @@ fn on_request_field_single(duel: &mut SingleDuel, transformer: SinglePlayerTrans
     if let Some(message) = &duel.last_select_message && duel.last_response.unwrap_or(transformer.to_player_index(CorePlayer::FirstAttackPlayer).unwrap_or(PlayerIndex::Player1)) == player {
         messages.push(message.clone().into());
     }
-    messages
+    // In theory `messages` should be returned and left to the main loop to send, but sent
+    // messages are inevitably recorded, and the filter table can hardly remove them from
+    // the record again. So we have to send them here directly, so that soumatou does not
+    // wrongly send information that cannot be masked.
+    for message in messages {
+        duel.sender.send_without_record(Complex::from_message(message), player.into());
+    };
 }
 
 #[handler(ctos::RequestField)]
 #[register_to(TAG_DUEL_YGOPRO_HANDLERS as TagDuelYgoproHandler)]
-fn on_request_field_tag(duel: &mut TagDuel, transformer: TagPlayerTransformer, states: &mut anymap3::Map<dyn std::any::Any + Send>, player: PlayerIndex) -> Vec<stoc::Message> {
+fn on_request_field_tag(duel: &mut TagDuel, transformer: TagPlayerTransformer, states: &mut anymap3::Map<dyn std::any::Any + Send>, player: PlayerIndex) {
     let attachment = match states.get::<Attachment>() {
         Some(attachment) => attachment,
-        None => return vec![],
+        None => return,
     };
 
-    let mut messages = vec![];
+    let mut messages: Vec<stoc::Message> = vec![];
     messages.push(stoc::DuelStart.into());
 
     let core_player = transformer.to_core_player(player.into());
-    let player_type = core_player as u8;
+    let player_type = gm::PlayerType::new().with_player(core_player);
     let start_lp = duel.host_info.start_lp as i32;
     messages.push(gm::Start {
         player_type,
@@ -249,5 +256,11 @@ fn on_request_field_tag(duel: &mut TagDuel, transformer: TagPlayerTransformer, s
     if let Some(message) = &duel.last_select_message && duel.last_response.unwrap_or(transformer.to_player_index(CorePlayer::FirstAttackPlayer).unwrap_or(PlayerIndex::Player1)) == player {
         messages.push(message.clone().into());
     }
-    messages
+    // In theory `messages` should be returned and left to the main loop to send, but sent
+    // messages are inevitably recorded, and the filter table can hardly remove them from
+    // the record again. So we have to send them here directly, so that soumatou does not
+    // wrongly send information that cannot be masked.
+    for message in messages {
+        duel.sender.send_without_record(Complex::from_message(message), player.into());
+    };
 }
