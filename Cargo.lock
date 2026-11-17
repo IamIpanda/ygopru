@@ -2066,7 +2066,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "ygopro"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anymap3",
  "arc-swap",
@@ -2113,13 +2113,14 @@ dependencies = [
 
 [[package]]
 name = "ygopro-data"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "binrw",
  "bitflags 2.13.1",
  "bytes",
  "darling",
  "encoding_rs",
+ "hashbrown 0.17.1",
  "lzma-rs",
  "modular-bitfield",
  "num_enum",

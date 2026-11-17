@@ -83,6 +83,8 @@ directory:
 - `script` folder — you can download from
   [ygopro-scripts](https://github.com/Fluorohydride/ygopro-scripts).
 - `lflist.conf` — this file can be skipped if you don't need a ban/limit list.
-- `system.conf` and `strings.conf` are not needed.
+- `system.conf` — optional, and where the plugins read their configuration values from; the entries available are
+  listed in [`variables.md`](https://github.com/iamipanda/ygopru/blob/HEAD/variables.md).
+- `strings.conf` is not needed.
 
 [`ygopro::init`]: https://docs.rs/ygopro/latest/ygopro/fn.init.html

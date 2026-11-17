@@ -4,13 +4,13 @@
 //! `gm` messages the client does and keeps the board queryable without any rendering.
 //! UI-only state (animations, selection panels, view-dependent flags) is dropped.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ops::AddAssign;
 
 use slotmap::SlotMap;
 use slotmap::new_key_type;
 
+use crate::HashMap;
+use crate::HashSet;
 use crate::constants::*;
 use crate::data::CardPosition;
 use crate::data::InfoLocation;

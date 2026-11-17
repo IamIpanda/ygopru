@@ -40,7 +40,7 @@
 //! end
 //! ```
 
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use ygopro_derive::Attachment;
 use ygopro_derive::before;

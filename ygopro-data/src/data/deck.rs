@@ -2,7 +2,6 @@
 //!
 //! Provides the [`Deck`] container and the deck-parsing logic.
 
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::iter::Chain;
@@ -17,6 +16,7 @@ use modular_bitfield::bitfield;
 use num_enum::IntoPrimitive;
 use num_enum::TryFromPrimitive;
 
+use crate::HashMap;
 use crate::constants::OT;
 use crate::constants::Rule;
 use crate::constants::Type;

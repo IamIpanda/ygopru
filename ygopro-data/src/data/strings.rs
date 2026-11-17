@@ -3,8 +3,9 @@
 //! Provides [`load_strings_conf`], which parses the conf into a category → id → string
 //! map.
 
-use std::collections::HashMap;
 use std::fs;
+
+use crate::HashMap;
 
 pub fn load_strings_conf(path: &str) -> HashMap<String, HashMap<i32, String>> {
     let mut map: HashMap<String, HashMap<i32, String>> = HashMap::new();

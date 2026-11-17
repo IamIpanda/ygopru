@@ -271,11 +271,12 @@ pub mod data_manager {
 
 /// Manage info from `strings.conf`.
 pub mod i18n {
-    use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::LazyLock;
 
     use arc_swap::ArcSwap;
+
+    use ygopro_data::HashMap;
 
     static GLOBAL_STRINGS: LazyLock<ArcSwap<HashMap<String, HashMap<i32, String>>>> = LazyLock::new(|| ArcSwap::from_pointee(HashMap::new()));
 

@@ -2,7 +2,7 @@
 //!
 //! Provides [`LFList`], which holds the card restrictions and computes the list hash.
 
-use std::collections::HashMap;
+use crate::HashMap;
 
 const HASH_INITIAL_VALUE: u32 = 0x7dfcee6a;
 const CREDIT_MARKER: u32 = 0x43524544;
