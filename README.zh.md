@@ -59,7 +59,8 @@ cargo build --release
 - `cards.cdb`，可从 [ygopro-database](https://github.com/mycard/ygopro-database) 获取。
 - `script` 文件夹，可从 [ygopro-scripts](https://github.com/Fluorohydride/ygopro-scripts) 下载。
 - `lflist.conf`。如果你不需要禁限表，可以跳过此文件。
-- 不需要 `system.conf` 和 `strings.conf`。
+- `system.conf`，可选，插件从它读取配置值，可用的配置项见 [`variables.md`](variables.md)。
+- 不需要 `strings.conf`。
 
 不带参数运行，启动一个随机端口的一次性服务器：
 

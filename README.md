@@ -67,7 +67,9 @@ Before start, please make sure following files are put in current directory:
 - `cards.cdb`, you can find one from [ygopro-database](https://github.com/mycard/ygopro-database).
 - `script` folder, you can download from [ygopro-scripts](https://github.com/Fluorohydride/ygopro-scripts)
 - `lflist.conf`. This file can be skipped if you don't need a ban/limit list.
-- `system.conf` and `strings.conf` are not needed.
+- `system.conf`, optional, and where the plugins read their configuration values from; the entries available are
+  listed in [`variables.md`](variables.md).
+- `strings.conf` is not needed.
 
 Run with no arguments for a one-shot server on a random port:
 
